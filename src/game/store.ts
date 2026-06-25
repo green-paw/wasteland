@@ -424,21 +424,30 @@ function processEndDay(state: GameState): GameState {
 
   // ---------- 4. Update survivor stats ----------
   survivors.forEach((s) => {
-    // hunger & thirst increase
-    s.hunger = Math.min(100, s.hunger + 15);
-    s.thirst = Math.min(100, s.thirst + 20);
-
-    // food shortage damage
-    if (foodShortage > 0 && s.role !== "onMission") {
+    // hunger & thirst: if base had enough food/water, the survivor ate/drank → decrease
+    // Otherwise, increase as before.
+    if (foodShortage === 0 && s.role !== "onMission") {
+      // Fed: hunger drops significantly
+      s.hunger = Math.max(0, s.hunger - 30);
+    } else if (s.role === "onMission") {
+      // On mission: ate travel rations, small increase
+      s.hunger = Math.min(100, s.hunger + 10);
+    } else {
+      // Shortage: hunger climbs
       s.hunger = Math.min(100, s.hunger + 25);
       s.health = Math.max(0, s.health - 5);
     }
-    if (waterShortage > 0 && s.role !== "onMission") {
+
+    if (waterShortage === 0 && s.role !== "onMission") {
+      s.thirst = Math.max(0, s.thirst - 35);
+    } else if (s.role === "onMission") {
+      s.thirst = Math.min(100, s.thirst + 15);
+    } else {
       s.thirst = Math.min(100, s.thirst + 30);
       s.health = Math.max(0, s.health - 8);
     }
 
-    // starvation damage
+    // starvation damage (only if hunger/thirst still critical despite eating)
     if (s.hunger >= 90) {
       s.health = Math.max(0, s.health - 8);
       if (s.role !== "onMission") {
@@ -472,7 +481,8 @@ function processEndDay(state: GameState): GameState {
     }
   });
 
-  // ---------- 5. Infirmary healing ----------
+  // ---------- 5. Healing ----------
+  // Infirmary: strong heal with medicine
   if (buildings.infirmary.level > 0) {
     const heal = buildings.infirmary.level * 10;
     const medicinePerHeal = 1;
@@ -490,6 +500,26 @@ function processEndDay(state: GameState): GameState {
             day,
             message: `${s.name} was treated at the infirmary (+${heal} HP).`,
             type: "success",
+          });
+        }
+      }
+    });
+  } else {
+    // No infirmary: slow natural recovery (resting already adds +5 above)
+    survivors.forEach((s) => {
+      if (s.status !== "healthy" && s.health < 100) {
+        const naturalHeal = 3;
+        s.health = Math.min(100, s.health + naturalHeal);
+        if (s.health >= 70) {
+          s.status = "healthy";
+        } else if (s.health >= 40 && s.status === "critical") {
+          s.status = "injured";
+        }
+        if (s.role !== "onMission") {
+          newLog.push({
+            day,
+            message: `${s.name} recovered naturally (+${naturalHeal} HP).`,
+            type: "info",
           });
         }
       }
@@ -682,7 +712,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   createTeam: (name) => {
     const state = get();
-    const maxTeams = Math.max(1, Math.ceil(state.survivors.length / 2));
+    // Allow up to as many teams as survivors (each team needs at least 1 member).
+    // Minimum 3 teams allowed so the player can split forces early.
+    const maxTeams = Math.max(3, state.survivors.length);
     if (state.teams.length >= maxTeams) return null;
     const team: Team = {
       id: `team_${Date.now()}_${Math.floor(Math.random() * 1000)}`,

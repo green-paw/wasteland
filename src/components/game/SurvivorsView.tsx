@@ -46,7 +46,8 @@ export function SurvivorsView() {
 
   const capacity = selectSurvivorCapacity(useGameStore.getState());
   const maxTeamSize = getMaxTeamSize(buildings.barracks.level);
-  const maxTeams = Math.max(1, Math.ceil(survivors.length / 2));
+  // Match store logic: allow up to survivor count, min 3.
+  const maxTeams = Math.max(3, survivors.length);
 
   const [selectedSurvivorId, setSelectedSurvivorId] = useState<string | null>(
     null

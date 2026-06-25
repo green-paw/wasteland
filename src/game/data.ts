@@ -316,7 +316,8 @@ export function getUpgradeCost(
 }
 
 export function getMaxTeamSize(barracksLevel: number): number {
-  return 1 + barracksLevel;
+  // Base 3 survivors per team; barracks adds +1 per level.
+  return 3 + barracksLevel;
 }
 
 export function getSurvivorCapacity(shelterLevel: number): number {
