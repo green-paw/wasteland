@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Line, Html, Text } from "@react-three/drei";
+import { OrbitControls, Line, Html } from "@react-three/drei";
 import { useMemo, useRef, useState, useEffect } from "react";
 import * as THREE from "three";
 import { useGameStore } from "@/game/store";
@@ -357,13 +357,21 @@ function LocationMarker({
         <meshBasicMaterial color={markerColor} />
       </mesh>
 
-      {/* Hover label */}
+      {/* Hover label — fixed screen size, follows the 3D position */}
       {(hovered || selected) && (
-        <Html position={[0, 3.5, 0]} center distanceFactor={12}>
-          <div className="bg-stone-950/95 border border-stone-700 rounded px-2 py-1 text-xs text-stone-100 whitespace-nowrap pointer-events-none">
-            <div className="font-bold">{def.label}</div>
-            <div className="text-[10px] text-stone-400">
-              {location.cleared ? "Cleared" : `${location.enemyCount} hostiles`}
+        <Html
+          position={[0, 3.5, 0]}
+          center
+          prepend
+          zIndexRange={[100, 0]}
+          style={{ pointerEvents: "none" }}
+        >
+          <div className="bg-stone-950/95 border border-stone-700 rounded px-2.5 py-1.5 text-xs text-stone-100 whitespace-nowrap shadow-xl">
+            <div className="font-bold text-amber-100">{def.label}</div>
+            <div className="text-[11px] text-stone-400">
+              {location.cleared
+                ? "Cleared"
+                : `${location.enemyCount} ${ENEMY_INFO[location.enemyType].label}`}
             </div>
           </div>
         </Html>
@@ -492,7 +500,14 @@ export function WorldMapView() {
     if (!selectedTeamId || !selectedLocationId) return;
     const team = teams.find((t) => t.id === selectedTeamId);
     if (!team || team.memberIds.length === 0) return;
+    // Don't allow if team already has a pending mission (defensive — UI also blocks this)
+    const teamHasPending = missions.some(
+      (m) => m.teamId === selectedTeamId && m.status === "pending"
+    );
+    if (teamHasPending) return;
     assignTeamToLocation(selectedTeamId, selectedLocationId);
+    // Clear team selection so the player must pick again (the just-dispatched team is now blocked)
+    setSelectedTeamId(null);
   };
 
   const handleClearMission = (teamId: string) => {
@@ -699,7 +714,16 @@ export function WorldMapView() {
               <Button
                 size="sm"
                 className="w-full bg-amber-700 hover:bg-amber-600 text-amber-50"
-                disabled={!selectedTeamId}
+                disabled={
+                  !selectedTeamId ||
+                  // Disable if selected team already has a pending mission
+                  (selectedTeamId
+                    ? missions.some(
+                        (m) =>
+                          m.teamId === selectedTeamId && m.status === "pending"
+                      )
+                    : true)
+                }
                 onClick={handleAssign}
               >
                 <Target className="w-3 h-3 mr-1" />

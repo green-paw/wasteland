@@ -758,6 +758,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const location = state.locations.find((l) => l.id === locationId);
     if (!location) return;
 
+    // Don't allow re-dispatching a team that already has a pending mission
+    const teamHasPending = state.missions.some(
+      (m) => m.teamId === teamId && m.status === "pending"
+    );
+    if (teamHasPending) return;
+
+    // If the same team is already dispatched to THIS location, do nothing
+    const sameLocationMission = state.missions.find(
+      (m) =>
+        m.teamId === teamId &&
+        m.locationId === locationId &&
+        m.status === "pending"
+    );
+    if (sameLocationMission) return;
+
     // create pending mission
     const mission: Mission = {
       id: `mission_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
