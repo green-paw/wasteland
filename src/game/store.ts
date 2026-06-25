@@ -77,7 +77,8 @@ function initialBuildings(): Record<BuildingType, Building> {
 }
 
 function createInitialState(): GameState {
-  const starter = generateSurvivor(1, "You");
+  // Starter survivor: random name from the pool (deterministic via seed=1)
+  const starter = generateSurvivor(1);
   starter.role = "idle";
   return {
     day: 1,

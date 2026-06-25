@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Line, Html } from "@react-three/drei";
+import { MapControls, Line, Html } from "@react-three/drei";
 import { useMemo, useRef, useState, useEffect } from "react";
 import * as THREE from "three";
 import { useGameStore } from "@/game/store";
@@ -308,7 +308,7 @@ function LocationMarker({
 
   return (
     <group position={location.position}>
-      {/* Invisible larger click-catcher for easier interaction */}
+      {/* Invisible larger click-catcher for easier interaction (box for top-down view) */}
       <mesh
         position={[0, 1, 0]}
         onClick={(e) => {
@@ -325,16 +325,28 @@ function LocationMarker({
           document.body.style.cursor = "auto";
         }}
       >
-        <cylinderGeometry args={[2.2, 2.2, 3, 12]} />
+        <boxGeometry args={[3, 3, 3]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-      {/* The building */}
+      {/* The building — faded if cleared */}
       <group>
         <LocationBuilding type={location.type} />
+        {location.cleared && (
+          // Overlay a translucent green tint on cleared buildings
+          <mesh position={[0, 0, 0]}>
+            <boxGeometry args={[2.5, 2.5, 2.5]} />
+            <meshBasicMaterial
+              color="#22c55e"
+              transparent
+              opacity={0.15}
+              depthWrite={false}
+            />
+          </mesh>
+        )}
       </group>
 
-      {/* Selection ring */}
+      {/* Selection ring (animated) — for selected/hovered/mission */}
       {(selected || hovered || hasMission) && (
         <mesh
           ref={ringRef}
@@ -356,6 +368,38 @@ function LocationMarker({
         <circleGeometry args={[0.3, 16]} />
         <meshBasicMaterial color={markerColor} />
       </mesh>
+
+      {/* Cleared indicator — green ring on the ground + floating checkmark flag */}
+      {location.cleared && (
+        <>
+          {/* Persistent green ring on the ground (always visible from top) */}
+          <mesh
+            rotation={[-Math.PI / 2, 0, 0]}
+            position={[0, 0.08, 0]}
+          >
+            <ringGeometry args={[2.0, 2.3, 24]} />
+            <meshBasicMaterial
+              color="#22c55e"
+              transparent
+              opacity={0.6}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          {/* Floating flag with checkmark (visible from any angle) */}
+          <group position={[0, 3.5, 0]}>
+            {/* Pole */}
+            <mesh position={[0, -0.6, 0]}>
+              <cylinderGeometry args={[0.04, 0.04, 1.2, 6]} />
+              <meshBasicMaterial color="#1a1a1a" />
+            </mesh>
+            {/* Flag */}
+            <mesh position={[0.3, -0.1, 0]}>
+              <planeGeometry args={[0.6, 0.4]} />
+              <meshBasicMaterial color="#22c55e" side={THREE.DoubleSide} />
+            </mesh>
+          </group>
+        </>
+      )}
 
       {/* Hover label — fixed screen size, follows the 3D position */}
       {(hovered || selected) && (
@@ -467,12 +511,14 @@ function Scene({
 
       <MissionLines />
 
-      <OrbitControls
-        enablePan={false}
-        minDistance={8}
-        maxDistance={35}
-        maxPolarAngle={Math.PI / 2.3}
+      <MapControls
+        enableRotate={false}
+        enablePan={true}
+        enableZoom={true}
+        minDistance={10}
+        maxDistance={40}
         target={[0, 0, 0]}
+        screenSpacePanning={false}
       />
     </>
   );
@@ -523,7 +569,7 @@ export function WorldMapView() {
         <div className="absolute top-3 left-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-3 py-1.5">
           <div className="text-xs text-stone-400">WORLD MAP</div>
           <div className="text-[10px] text-stone-500">
-            Click a location to scout • Drag to rotate • Scroll to zoom
+            Click a location to scout • Drag to pan • Scroll to zoom
           </div>
         </div>
         <div className="absolute top-3 right-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-2 py-1.5 flex items-center gap-2">
@@ -542,7 +588,7 @@ export function WorldMapView() {
         </div>
         <Canvas
           shadows
-          camera={{ position: [12, 14, 12], fov: 50 }}
+          camera={{ position: [0, 25, 0.1], fov: 45 }}
           gl={{ antialias: false }}
         >
           <Scene
