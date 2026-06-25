@@ -24,6 +24,7 @@ import {
   Trash2,
   ArrowRight,
   X,
+  Wand2,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -66,6 +67,49 @@ export function SurvivorsView() {
     createTeam(`Team ${name}`);
   };
 
+  // Auto-assign: distribute available survivors across existing teams (filling the
+  // smallest first), and create a new team if there are leftovers and capacity allows.
+  const handleAutoAssign = () => {
+    const state = useGameStore.getState();
+    const available = state.survivors.filter(
+      (s) => s.role === "idle" || s.role === "resting"
+    );
+    if (available.length === 0) return;
+
+    // Sort teams by current size ascending so we fill the smallest first
+    let teams = [...state.teams].sort(
+      (a, b) => a.memberIds.length - b.memberIds.length
+    );
+    const maxSize = getMaxTeamSize(state.buildings.barracks.level);
+
+    let assigned = 0;
+    for (const survivor of available) {
+      // Find a team with space
+      let target = teams.find((t) => t.memberIds.length < maxSize);
+      if (!target) {
+        // Try to create a new team if possible
+        const maxTeamsCount = Math.max(3, state.survivors.length);
+        if (teams.length >= maxTeamsCount) break;
+        const newName = `Team ${String.fromCharCode(65 + teams.length)}`;
+        const newId = state.createTeam(newName);
+        if (!newId) break;
+        // Re-read teams after creation
+        const updated = useGameStore.getState().teams;
+        target = updated.find((t) => t.id === newId);
+        if (!target) break;
+        teams = [...updated].sort((a, b) => a.memberIds.length - b.memberIds.length);
+      }
+      state.assignSurvivorToTeam(survivor.id, target.id);
+      assigned++;
+      // Re-read teams to get updated member counts
+      teams = [...useGameStore.getState().teams].sort(
+        (a, b) => a.memberIds.length - b.memberIds.length
+      );
+    }
+  };
+
+  const hasAvailableSurvivors = idleSurvivors.length > 0;
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -84,15 +128,27 @@ export function SurvivorsView() {
             Max team size: {maxTeamSize}
           </Badge>
         </div>
-        <Button
-          size="sm"
-          onClick={handleCreateTeam}
-          disabled={teams.length >= maxTeams}
-          className="bg-amber-700 hover:bg-amber-600 text-amber-50"
-        >
-          <UserPlus className="w-4 h-4 mr-1" />
-          New Team ({teams.length}/{maxTeams})
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            size="sm"
+            onClick={handleAutoAssign}
+            disabled={!hasAvailableSurvivors}
+            variant="outline"
+            className="border-emerald-800 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/50"
+          >
+            <Wand2 className="w-4 h-4 mr-1" />
+            Auto-Assign
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleCreateTeam}
+            disabled={teams.length >= maxTeams}
+            className="bg-amber-700 hover:bg-amber-600 text-amber-50"
+          >
+            <UserPlus className="w-4 h-4 mr-1" />
+            New Team ({teams.length}/{maxTeams})
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4">

@@ -24,10 +24,55 @@ import {
   Trash2,
 } from "lucide-react";
 
+// ---------- Helper: window ----------
+function Window({
+  position,
+  rotation = [0, 0, 0],
+  size = [0.3, 0.4],
+  color = "#5a7a8a",
+}: {
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  size?: [number, number];
+  color?: string;
+}) {
+  return (
+    <mesh position={position} rotation={rotation}>
+      <planeGeometry args={size} />
+      <meshStandardMaterial
+        color={color}
+        emissive="#1a2a3a"
+        emissiveIntensity={0.3}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
+// ---------- Helper: door ----------
+function Door({
+  position,
+  rotation = [0, 0, 0],
+  size = [0.5, 0.9],
+  color = "#2a1a0a",
+}: {
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  size?: [number, number];
+  color?: string;
+}) {
+  return (
+    <mesh position={position} rotation={rotation}>
+      <planeGeometry args={size} />
+      <meshStandardMaterial color={color} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
 // ---------- Low-poly terrain ----------
 function Terrain() {
   const geometry = useMemo(() => {
-    const geo = new THREE.PlaneGeometry(60, 60, 30, 30);
+    const geo = new THREE.PlaneGeometry(80, 80, 40, 40);
     // subtle height variation
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
@@ -53,212 +98,540 @@ function Terrain() {
   );
 }
 
-// ---------- Low-poly base buildings ----------
+// ---------- Low-poly base buildings (more detailed) ----------
 function BaseBuildings() {
   return (
     <group position={[0, 0, 0]}>
-      {/* Main shelter — bigger box */}
+      {/* Main shelter — main body */}
       <mesh position={[0, 0.8, 0]} castShadow>
         <boxGeometry args={[2.4, 1.6, 2]} />
         <meshStandardMaterial color="#6b5a3a" flatShading roughness={0.9} />
       </mesh>
-      {/* Roof */}
-      <mesh position={[0, 1.8, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-        <coneGeometry args={[1.9, 0.8, 4]} />
+      {/* Roof — pyramid shape */}
+      <mesh position={[0, 1.85, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+        <coneGeometry args={[1.9, 0.9, 4]} />
         <meshStandardMaterial color="#3a2a1a" flatShading roughness={1} />
       </mesh>
-      {/* Door */}
-      <mesh position={[0, 0.5, 1.01]}>
-        <planeGeometry args={[0.6, 1]} />
-        <meshStandardMaterial color="#2a1a0a" />
-      </mesh>
-      {/* Watchtower */}
-      <mesh position={[2, 1.5, -1.5]} castShadow>
-        <cylinderGeometry args={[0.2, 0.25, 3, 6]} />
+      {/* Chimney */}
+      <mesh position={[0.6, 2.2, -0.3]} castShadow>
+        <boxGeometry args={[0.3, 0.5, 0.3]} />
         <meshStandardMaterial color="#4a3a2a" flatShading />
       </mesh>
-      <mesh position={[2, 3, -1.5]} castShadow>
-        <boxGeometry args={[1, 0.8, 1]} />
+      {/* Door */}
+      <Door position={[0, 0.45, 1.01]} size={[0.6, 0.9]} color="#2a1a0a" />
+      {/* Door handle */}
+      <mesh position={[0.2, 0.45, 1.02]}>
+        <sphereGeometry args={[0.04, 6, 6]} />
+        <meshStandardMaterial color="#aa8833" metalness={0.7} roughness={0.3} />
+      </mesh>
+      {/* Front windows */}
+      <Window position={[-0.7, 0.9, 1.01]} size={[0.4, 0.4]} />
+      <Window position={[0.7, 0.9, 1.01]} size={[0.4, 0.4]} />
+      {/* Side windows */}
+      <Window position={[1.21, 0.9, 0]} rotation={[0, Math.PI / 2, 0]} size={[0.4, 0.4]} />
+      <Window position={[-1.21, 0.9, 0]} rotation={[0, Math.PI / 2, 0]} size={[0.4, 0.4]} />
+
+      {/* Watchtower — 4 legs */}
+      <mesh position={[2.3, 1, -1.5]} castShadow>
+        <cylinderGeometry args={[0.12, 0.14, 2, 6]} />
+        <meshStandardMaterial color="#4a3a2a" flatShading />
+      </mesh>
+      <mesh position={[1.7, 1, -1.5]} castShadow>
+        <cylinderGeometry args={[0.12, 0.14, 2, 6]} />
+        <meshStandardMaterial color="#4a3a2a" flatShading />
+      </mesh>
+      <mesh position={[2.3, 1, -0.9]} castShadow>
+        <cylinderGeometry args={[0.12, 0.14, 2, 6]} />
+        <meshStandardMaterial color="#4a3a2a" flatShading />
+      </mesh>
+      <mesh position={[1.7, 1, -0.9]} castShadow>
+        <cylinderGeometry args={[0.12, 0.14, 2, 6]} />
+        <meshStandardMaterial color="#4a3a2a" flatShading />
+      </mesh>
+      {/* Watchtower platform */}
+      <mesh position={[2, 2.2, -1.2]} castShadow>
+        <boxGeometry args={[1, 0.2, 1]} />
         <meshStandardMaterial color="#5a4a3a" flatShading />
       </mesh>
-      {/* Farm plot */}
-      <mesh position={[-2, 0.05, 1.5]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[1.5, 1.5]} />
-        <meshStandardMaterial color="#4a5a2a" flatShading />
+      {/* Watchtower roof */}
+      <mesh position={[2, 2.9, -1.2]} rotation={[0, Math.PI / 4, 0]} castShadow>
+        <coneGeometry args={[0.8, 0.6, 4]} />
+        <meshStandardMaterial color="#3a2a1a" flatShading />
       </mesh>
-      {/* Flag */}
+
+      {/* Farm plot — rows of crops */}
+      <mesh position={[-2, 0.05, 1.5]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[1.8, 1.8]} />
+        <meshStandardMaterial color="#4a3a1a" flatShading />
+      </mesh>
+      {[0, 1, 2, 3].map((i) => (
+        <mesh key={i} position={[-2.6 + i * 0.4, 0.1, 1.5]} castShadow>
+          <boxGeometry args={[0.1, 0.15, 1.4]} />
+          <meshStandardMaterial color="#5a8a2a" flatShading />
+        </mesh>
+      ))}
+
+      {/* Storage crates */}
+      <mesh position={[-2, 0.4, -1.5]} castShadow>
+        <boxGeometry args={[0.8, 0.8, 0.8]} />
+        <meshStandardMaterial color="#6a5a3a" flatShading />
+      </mesh>
+      <mesh position={[-1.4, 0.3, -1.7]} castShadow>
+        <boxGeometry args={[0.6, 0.6, 0.6]} />
+        <meshStandardMaterial color="#5a4a2a" flatShading />
+      </mesh>
+
+      {/* Flag pole + flag */}
       <mesh position={[0, 2.5, 0]}>
         <cylinderGeometry args={[0.04, 0.04, 1.4, 6]} />
         <meshStandardMaterial color="#2a2a2a" />
       </mesh>
-      <mesh position={[0.2, 3, 0]}>
-        <planeGeometry args={[0.4, 0.25]} />
+      <mesh position={[0.25, 3, 0]}>
+        <planeGeometry args={[0.5, 0.3]} />
         <meshStandardMaterial color="#a83a3a" side={THREE.DoubleSide} />
       </mesh>
+
+      {/* Sandbags around perimeter */}
+      {[
+        [1.5, 0.2, 1.2],
+        [1.8, 0.2, 1.0],
+        [-1.5, 0.2, -1.2],
+        [-1.8, 0.2, -1.0],
+        [1.5, 0.2, -1.2],
+        [-1.5, 0.2, 1.2],
+      ].map((pos, i) => (
+        <mesh key={i} position={pos as [number, number, number]} castShadow>
+          <boxGeometry args={[0.35, 0.25, 0.25]} />
+          <meshStandardMaterial color="#8a7a5a" flatShading />
+        </mesh>
+      ))}
     </group>
   );
 }
 
-// ---------- Location building models ----------
+// ---------- Location building models (detailed) ----------
 function LocationBuilding({ type }: { type: LocationType }) {
-  // Different low-poly shapes per type
   const color = LOCATION_DEFS[type].color;
   switch (type) {
     case "abandoned_house":
       return (
         <group>
+          {/* Main body */}
           <mesh position={[0, 0.6, 0]} castShadow>
             <boxGeometry args={[1.2, 1.2, 1.2]} />
             <meshStandardMaterial color={color} flatShading roughness={1} />
           </mesh>
+          {/* Roof — pyramid */}
           <mesh position={[0, 1.5, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-            <coneGeometry args={[1, 0.6, 4]} />
+            <coneGeometry args={[1, 0.7, 4]} />
             <meshStandardMaterial color="#3a2a1a" flatShading />
+          </mesh>
+          {/* Door */}
+          <Door position={[0, 0.35, 0.61]} size={[0.4, 0.7]} color="#1a0a00" />
+          {/* Windows (broken/dark) */}
+          <Window position={[-0.35, 0.8, 0.61]} size={[0.3, 0.3]} color="#1a1a1a" />
+          <Window position={[0.35, 0.8, 0.61]} size={[0.3, 0.3]} color="#1a1a1a" />
+          {/* Side window */}
+          <Window position={[0.61, 0.8, 0]} rotation={[0, Math.PI / 2, 0]} size={[0.3, 0.3]} color="#1a1a1a" />
+          {/* Collapsed porch / debris */}
+          <mesh position={[0, 0.1, 0.9]} castShadow>
+            <boxGeometry args={[0.8, 0.2, 0.4]} />
+            <meshStandardMaterial color="#4a3a2a" flatShading />
           </mesh>
         </group>
       );
     case "supermarket":
       return (
         <group>
+          {/* Main body */}
           <mesh position={[0, 0.75, 0]} castShadow>
             <boxGeometry args={[2, 1.5, 1.5]} />
             <meshStandardMaterial color={color} flatShading />
           </mesh>
-          <mesh position={[0, 1.55, 0]}>
+          {/* Flat roof */}
+          <mesh position={[0, 1.55, 0]} castShadow>
             <boxGeometry args={[2.1, 0.1, 1.6]} />
             <meshStandardMaterial color="#2a2a2a" flatShading />
+          </mesh>
+          {/* Roof AC unit */}
+          <mesh position={[0.5, 1.7, 0]} castShadow>
+            <boxGeometry args={[0.5, 0.25, 0.5]} />
+            <meshStandardMaterial color="#4a4a4a" flatShading />
+          </mesh>
+          {/* Entrance doors (double) */}
+          <Door position={[-0.25, 0.45, 0.76]} size={[0.35, 0.9]} color="#1a1a1a" />
+          <Door position={[0.25, 0.45, 0.76]} size={[0.35, 0.9]} color="#1a1a1a" />
+          {/* Storefront windows (wide) */}
+          <Window position={[-0.8, 0.8, 0.76]} size={[0.4, 0.6]} color="#2a3a4a" />
+          <Window position={[0.8, 0.8, 0.76]} size={[0.4, 0.6]} color="#2a3a4a" />
+          {/* Sign */}
+          <mesh position={[0, 1.3, 0.76]}>
+            <boxGeometry args={[1.5, 0.25, 0.05]} />
+            <meshStandardMaterial color="#aa3333" />
+          </mesh>
+          {/* Shopping cart */}
+          <mesh position={[1.3, 0.3, 0.8]} castShadow>
+            <boxGeometry args={[0.3, 0.4, 0.4]} />
+            <meshStandardMaterial color="#5a5a5a" wireframe />
           </mesh>
         </group>
       );
     case "hospital":
       return (
         <group>
-          <mesh position={[0, 1, 0]} castShadow>
-            <boxGeometry args={[1.5, 2, 1.5]} />
+          {/* Main tower */}
+          <mesh position={[0, 1.2, 0]} castShadow>
+            <boxGeometry args={[1.5, 2.4, 1.5]} />
             <meshStandardMaterial color={color} flatShading />
           </mesh>
-          <mesh position={[0, 2.2, 0]} rotation={[0, Math.PI / 4, 0]}>
-            <boxGeometry args={[0.6, 0.4, 0.05]} />
-            <meshStandardMaterial color="#cc3333" />
+          {/* Flat roof */}
+          <mesh position={[0, 2.45, 0]} castShadow>
+            <boxGeometry args={[1.6, 0.1, 1.6]} />
+            <meshStandardMaterial color="#3a3a3a" flatShading />
+          </mesh>
+          {/* Red cross sign */}
+          <mesh position={[0, 1.8, 0.76]}>
+            <boxGeometry args={[0.7, 0.2, 0.05]} />
+            <meshStandardMaterial color="#cc3333" emissive="#cc3333" emissiveIntensity={0.3} />
+          </mesh>
+          <mesh position={[0, 1.8, 0.76]}>
+            <boxGeometry args={[0.2, 0.7, 0.05]} />
+            <meshStandardMaterial color="#cc3333" emissive="#cc3333" emissiveIntensity={0.3} />
+          </mesh>
+          {/* Entrance (double doors) */}
+          <Door position={[-0.25, 0.5, 0.76]} size={[0.35, 1]} color="#2a4a5a" />
+          <Door position={[0.25, 0.5, 0.76]} size={[0.35, 1]} color="#2a4a5a" />
+          {/* Row of windows floor 1 */}
+          <Window position={[-0.5, 1.2, 0.76]} size={[0.3, 0.4]} color="#6a8a9a" />
+          <Window position={[0.5, 1.2, 0.76]} size={[0.3, 0.4]} color="#6a8a9a" />
+          {/* Row of windows floor 2 */}
+          <Window position={[-0.5, 2, 0.76]} size={[0.3, 0.4]} color="#6a8a9a" />
+          <Window position={[0.5, 2, 0.76]} size={[0.3, 0.4]} color="#6a8a9a" />
+          {/* Ambulance */}
+          <mesh position={[1.3, 0.4, 0.5]} castShadow>
+            <boxGeometry args={[0.7, 0.6, 1.2]} />
+            <meshStandardMaterial color="#eeeeee" flatShading />
+          </mesh>
+          <mesh position={[1.3, 0.7, 0.5]}>
+            <boxGeometry args={[0.6, 0.3, 0.8]} />
+            <meshStandardMaterial color="#cc3333" flatShading />
           </mesh>
         </group>
       );
     case "gas_station":
       return (
         <group>
+          {/* Convenience store */}
           <mesh position={[0, 0.5, 0]} castShadow>
             <boxGeometry args={[1.4, 1, 1]} />
             <meshStandardMaterial color={color} flatShading />
           </mesh>
-          <mesh position={[0, 1.15, 0]}>
-            <boxGeometry args={[1.5, 0.2, 1.1]} />
+          {/* Flat roof */}
+          <mesh position={[0, 1.05, 0]} castShadow>
+            <boxGeometry args={[1.5, 0.1, 1.1]} />
             <meshStandardMaterial color="#3a3a3a" flatShading />
           </mesh>
-          <mesh position={[0.8, 0.7, 0.6]}>
+          {/* Door */}
+          <Door position={[0, 0.35, 0.51]} size={[0.4, 0.7]} color="#1a1a1a" />
+          {/* Window */}
+          <Window position={[-0.4, 0.5, 0.51]} size={[0.4, 0.4]} color="#3a4a5a" />
+          {/* Canopy over pumps */}
+          <mesh position={[1.3, 1.4, 0]} castShadow>
+            <boxGeometry args={[1.6, 0.15, 1.6]} />
+            <meshStandardMaterial color="#5a5a5a" flatShading />
+          </mesh>
+          {/* Canopy supports */}
+          <mesh position={[0.7, 0.7, -0.6]} castShadow>
             <cylinderGeometry args={[0.08, 0.08, 1.4, 6]} />
-            <meshStandardMaterial color="#2a2a2a" />
+            <meshStandardMaterial color="#3a3a3a" />
+          </mesh>
+          <mesh position={[1.9, 0.7, -0.6]} castShadow>
+            <cylinderGeometry args={[0.08, 0.08, 1.4, 6]} />
+            <meshStandardMaterial color="#3a3a3a" />
+          </mesh>
+          <mesh position={[0.7, 0.7, 0.6]} castShadow>
+            <cylinderGeometry args={[0.08, 0.08, 1.4, 6]} />
+            <meshStandardMaterial color="#3a3a3a" />
+          </mesh>
+          <mesh position={[1.9, 0.7, 0.6]} castShadow>
+            <cylinderGeometry args={[0.08, 0.08, 1.4, 6]} />
+            <meshStandardMaterial color="#3a3a3a" />
+          </mesh>
+          {/* Gas pumps */}
+          <mesh position={[1.3, 0.5, 0]} castShadow>
+            <boxGeometry args={[0.25, 0.8, 0.5]} />
+            <meshStandardMaterial color="#3a4a5a" flatShading />
+          </mesh>
+          <mesh position={[1.3, 0.9, 0.15]}>
+            <boxGeometry args={[0.2, 0.15, 0.2]} />
+            <meshStandardMaterial color="#2a3a4a" />
           </mesh>
         </group>
       );
     case "warehouse":
       return (
         <group>
+          {/* Main body */}
           <mesh position={[0, 0.75, 0]} castShadow>
             <boxGeometry args={[2.2, 1.5, 1.6]} />
             <meshStandardMaterial color={color} flatShading />
           </mesh>
-          <mesh position={[0, 1.7, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-            <coneGeometry args={[1.6, 0.7, 4]} />
-            <meshStandardMaterial color="#2a2a2a" flatShading />
+          {/* Curved roof — half cylinder */}
+          <mesh position={[0, 1.7, 0]} rotation={[0, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.85, 0.85, 2.2, 8, 1, false, 0, Math.PI]} />
+            <meshStandardMaterial color="#2a2a2a" flatShading side={THREE.DoubleSide} />
+          </mesh>
+          {/* Loading dock door (large) */}
+          <mesh position={[0, 0.6, 0.81]}>
+            <boxGeometry args={[1.2, 1.1, 0.05]} />
+            <meshStandardMaterial color="#3a3a3a" flatShading />
+          </mesh>
+          {/* Door lines (rolled up) */}
+          {[0, 1, 2, 3, 4].map((i) => (
+            <mesh key={i} position={[0, 0.2 + i * 0.2, 0.82]}>
+              <boxGeometry args={[1.2, 0.03, 0.02]} />
+              <meshStandardMaterial color="#1a1a1a" />
+            </mesh>
+          ))}
+          {/* Small office window */}
+          <Window position={[-0.8, 1, 0.81]} size={[0.3, 0.3]} color="#2a3a4a" />
+          {/* Pallets */}
+          <mesh position={[1.2, 0.15, 0.5]} castShadow>
+            <boxGeometry args={[0.5, 0.15, 0.5]} />
+            <meshStandardMaterial color="#5a4a2a" flatShading />
+          </mesh>
+          <mesh position={[1.2, 0.4, 0.5]} castShadow>
+            <boxGeometry args={[0.4, 0.3, 0.4]} />
+            <meshStandardMaterial color="#6a5a3a" flatShading />
           </mesh>
         </group>
       );
     case "military_base":
       return (
         <group>
+          {/* Bunker main body */}
           <mesh position={[0, 0.5, 0]} castShadow>
             <boxGeometry args={[2, 1, 1.5]} />
             <meshStandardMaterial color={color} flatShading />
           </mesh>
-          <mesh position={[-0.7, 1.3, -0.4]} castShadow>
-            <cylinderGeometry args={[0.1, 0.1, 1.6, 6]} />
+          {/* Sandbag wall in front */}
+          {[-0.8, -0.4, 0, 0.4, 0.8].map((x, i) => (
+            <mesh key={i} position={[x, 0.2, 0.9]} castShadow>
+              <boxGeometry args={[0.35, 0.3, 0.25]} />
+              <meshStandardMaterial color="#8a7a5a" flatShading />
+            </mesh>
+          ))}
+          {[-0.6, -0.2, 0.2, 0.6].map((x, i) => (
+            <mesh key={`s${i}`} position={[x, 0.45, 0.9]} castShadow>
+              <boxGeometry args={[0.35, 0.3, 0.25]} />
+              <meshStandardMaterial color="#7a6a4a" flatShading />
+            </mesh>
+          ))}
+          {/* Radio antenna tower */}
+          <mesh position={[-1, 1.3, -0.4]} castShadow>
+            <cylinderGeometry args={[0.06, 0.08, 1.8, 6]} />
+            <meshStandardMaterial color="#3a3a3a" />
+          </mesh>
+          <mesh position={[-1, 2, -0.4]}>
+            <boxGeometry args={[0.4, 0.05, 0.05]} />
             <meshStandardMaterial color="#2a2a2a" />
           </mesh>
-          <mesh position={[-0.7, 2.2, -0.4]}>
-            <boxGeometry args={[0.5, 0.3, 0.5]} />
-            <meshStandardMaterial color="#4a5a3a" flatShading />
+          <mesh position={[-1, 2.2, -0.4]}>
+            <sphereGeometry args={[0.08, 6, 6]} />
+            <meshStandardMaterial color="#aa3333" emissive="#aa3333" emissiveIntensity={0.5} />
           </mesh>
-          <mesh position={[0.7, 0.5, 0]} castShadow>
-            <boxGeometry args={[0.4, 0.8, 0.4]} />
-            <meshStandardMaterial color="#3a4a2a" flatShading />
+          {/* Sandbag bunker (small) */}
+          <mesh position={[0.9, 0.4, 0]} castShadow>
+            <cylinderGeometry args={[0.5, 0.6, 0.7, 8]} />
+            <meshStandardMaterial color="#6a5a3a" flatShading />
+          </mesh>
+          {/* Door */}
+          <Door position={[0, 0.4, 0.76]} size={[0.5, 0.8]} color="#2a3a1a" />
+          {/* Ammo crate */}
+          <mesh position={[0.7, 0.2, 0.7]} castShadow>
+            <boxGeometry args={[0.4, 0.3, 0.4]} />
+            <meshStandardMaterial color="#4a5a3a" flatShading />
           </mesh>
         </group>
       );
     case "school":
       return (
         <group>
+          {/* Main body */}
           <mesh position={[0, 0.75, 0]} castShadow>
             <boxGeometry args={[2.2, 1.5, 1.4]} />
             <meshStandardMaterial color={color} flatShading />
           </mesh>
-          <mesh position={[0, 1.6, 0]}>
-            <boxGeometry args={[2.3, 0.2, 1.5]} />
+          {/* Flat roof */}
+          <mesh position={[0, 1.55, 0]} castShadow>
+            <boxGeometry args={[2.3, 0.15, 1.5]} />
             <meshStandardMaterial color="#3a2a1a" flatShading />
+          </mesh>
+          {/* Front entrance — steps */}
+          <mesh position={[0, 0.1, 0.8]} castShadow>
+            <boxGeometry args={[1.2, 0.2, 0.3]} />
+            <meshStandardMaterial color="#5a5a5a" flatShading />
+          </mesh>
+          <mesh position={[0, 0.25, 0.95]} castShadow>
+            <boxGeometry args={[1, 0.15, 0.2]} />
+            <meshStandardMaterial color="#4a4a4a" flatShading />
+          </mesh>
+          {/* Double doors */}
+          <Door position={[-0.2, 0.55, 0.71]} size={[0.3, 0.9]} color="#2a1a0a" />
+          <Door position={[0.2, 0.55, 0.71]} size={[0.3, 0.9]} color="#2a1a0a" />
+          {/* Row of windows */}
+          <Window position={[-0.8, 0.9, 0.71]} size={[0.35, 0.5]} color="#3a4a5a" />
+          <Window position={[0.8, 0.9, 0.71]} size={[0.35, 0.5]} color="#3a4a5a" />
+          <Window position={[-0.8, 1.3, 0.71]} size={[0.35, 0.3]} color="#3a4a5a" />
+          <Window position={[0.8, 1.3, 0.71]} size={[0.35, 0.3]} color="#3a4a5a" />
+          {/* Flagpole */}
+          <mesh position={[1.2, 1.5, 0.6]}>
+            <cylinderGeometry args={[0.04, 0.04, 1.5, 6]} />
+            <meshStandardMaterial color="#3a3a3a" />
+          </mesh>
+          <mesh position={[1.35, 2.1, 0.6]}>
+            <planeGeometry args={[0.3, 0.2]} />
+            <meshStandardMaterial color="#aa3333" side={THREE.DoubleSide} />
           </mesh>
         </group>
       );
     case "church":
       return (
         <group>
-          <mesh position={[0, 0.75, 0]} castShadow>
+          {/* Nave (main body) */}
+          <mesh position={[0, 0.75, 0.3]} castShadow>
             <boxGeometry args={[1.2, 1.5, 1.8]} />
             <meshStandardMaterial color={color} flatShading />
           </mesh>
-          <mesh position={[0, 2, 0.4]} rotation={[0, Math.PI / 4, 0]} castShadow>
-            <coneGeometry args={[0.9, 1.2, 4]} />
+          {/* Roof — triangular prism */}
+          <mesh position={[0, 1.7, 0.3]} rotation={[0, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.7, 0.7, 1.8, 3]} />
             <meshStandardMaterial color="#3a2a1a" flatShading />
           </mesh>
-          <mesh position={[0, 2.6, 0.4]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.04, 0.04, 0.4, 4]} />
-            <meshStandardMaterial color="#3a3a3a" />
+          {/* Bell tower */}
+          <mesh position={[0, 1.2, -0.7]} castShadow>
+            <boxGeometry args={[0.8, 2.4, 0.8]} />
+            <meshStandardMaterial color={color} flatShading />
           </mesh>
-          <mesh position={[0, 2.8, 0.4]}>
-            <boxGeometry args={[0.2, 0.4, 0.04]} />
-            <meshStandardMaterial color="#cc3333" />
+          {/* Bell tower roof — pyramid */}
+          <mesh position={[0, 2.7, -0.7]} rotation={[0, Math.PI / 4, 0]} castShadow>
+            <coneGeometry args={[0.65, 0.8, 4]} />
+            <meshStandardMaterial color="#3a2a1a" flatShading />
+          </mesh>
+          {/* Bell opening */}
+          <mesh position={[0, 1.5, -0.31]}>
+            <boxGeometry args={[0.4, 0.5, 0.05]} />
+            <meshStandardMaterial color="#1a1a1a" />
+          </mesh>
+          {/* Cross on top */}
+          <mesh position={[0, 3.3, -0.7]}>
+            <boxGeometry args={[0.05, 0.4, 0.05]} />
+            <meshStandardMaterial color="#aaaaaa" metalness={0.5} />
+          </mesh>
+          <mesh position={[0, 3.35, -0.7]}>
+            <boxGeometry args={[0.25, 0.05, 0.05]} />
+            <meshStandardMaterial color="#aaaaaa" metalness={0.5} />
+          </mesh>
+          {/* Main door (arched look) */}
+          <Door position={[0, 0.5, 1.21]} size={[0.5, 1]} color="#1a0a00" />
+          {/* Stained glass windows */}
+          <Window position={[-0.45, 1, 1.21]} size={[0.3, 0.5]} color="#aa6a3a" />
+          <Window position={[0.45, 1, 1.21]} size={[0.3, 0.5]} color="#aa6a3a" />
+          {/* Gravestones */}
+          <mesh position={[1, 0.3, 0.5]} castShadow>
+            <boxGeometry args={[0.2, 0.5, 0.05]} />
+            <meshStandardMaterial color="#6a6a6a" flatShading />
+          </mesh>
+          <mesh position={[-1, 0.3, 0.8]} castShadow>
+            <boxGeometry args={[0.2, 0.4, 0.05]} />
+            <meshStandardMaterial color="#5a5a5a" flatShading />
           </mesh>
         </group>
       );
     case "factory":
       return (
         <group>
+          {/* Main body */}
           <mesh position={[0, 0.75, 0]} castShadow>
             <boxGeometry args={[2.2, 1.5, 1.6]} />
             <meshStandardMaterial color={color} flatShading />
           </mesh>
-          <mesh position={[-0.6, 1.9, 0]} castShadow>
-            <cylinderGeometry args={[0.2, 0.25, 1, 8]} />
+          {/* Sawtooth roof — multiple angled sections */}
+          {[-0.7, -0.2, 0.3, 0.8].map((x, i) => (
+            <mesh key={i} position={[x, 1.6, 0]} rotation={[0, 0, Math.PI / 6]} castShadow>
+              <boxGeometry args={[0.45, 0.05, 1.6]} />
+              <meshStandardMaterial color="#2a2a2a" flatShading />
+            </mesh>
+          ))}
+          {/* Two chimneys */}
+          <mesh position={[-0.6, 2, 0]} castShadow>
+            <cylinderGeometry args={[0.22, 0.28, 1.2, 8]} />
+            <meshStandardMaterial color="#3a3a3a" flatShading />
+          </mesh>
+          <mesh position={[-0.6, 2.65, 0]}>
+            <cylinderGeometry args={[0.22, 0.22, 0.15, 8]} />
+            <meshStandardMaterial color="#1a1a1a" flatShading />
+          </mesh>
+          <mesh position={[0.6, 2.3, 0]} castShadow>
+            <cylinderGeometry args={[0.18, 0.22, 1.6, 8]} />
+            <meshStandardMaterial color="#3a3a3a" flatShading />
+          </mesh>
+          <mesh position={[0.6, 3.15, 0]}>
+            <cylinderGeometry args={[0.18, 0.18, 0.15, 8]} />
+            <meshStandardMaterial color="#1a1a1a" flatShading />
+          </mesh>
+          {/* Large industrial door */}
+          <mesh position={[0, 0.6, 0.81]}>
+            <boxGeometry args={[1.2, 1.2, 0.05]} />
             <meshStandardMaterial color="#2a2a2a" flatShading />
           </mesh>
-          <mesh position={[0.6, 1.9, 0]} castShadow>
-            <cylinderGeometry args={[0.2, 0.25, 1, 8]} />
-            <meshStandardMaterial color="#2a2a2a" flatShading />
+          {/* Rust stains */}
+          <mesh position={[-0.7, 0.5, 0.81]}>
+            <planeGeometry args={[0.4, 0.6]} />
+            <meshStandardMaterial color="#5a3a1a" transparent opacity={0.4} />
+          </mesh>
+          {/* Pipes on side */}
+          <mesh position={[1.11, 1, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.08, 0.08, 1.4, 6]} />
+            <meshStandardMaterial color="#5a4a3a" />
+          </mesh>
+          <mesh position={[1.11, 0.5, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.06, 0.06, 1.4, 6]} />
+            <meshStandardMaterial color="#3a3a3a" />
           </mesh>
         </group>
       );
     case "pharmacy":
       return (
         <group>
+          {/* Main body */}
           <mesh position={[0, 0.6, 0]} castShadow>
             <boxGeometry args={[1.3, 1.2, 1.2]} />
             <meshStandardMaterial color={color} flatShading />
           </mesh>
-          <mesh position={[0, 1.4, 0]}>
-            <boxGeometry args={[1.4, 0.15, 1.3]} />
+          {/* Flat roof */}
+          <mesh position={[0, 1.25, 0]} castShadow>
+            <boxGeometry args={[1.4, 0.1, 1.3]} />
             <meshStandardMaterial color="#3a3a3a" flatShading />
           </mesh>
+          {/* Green cross sign (pharmacy) */}
           <mesh position={[0, 1, 0.61]}>
-            <planeGeometry args={[0.4, 0.4]} />
-            <meshStandardMaterial color="#cc3333" />
+            <boxGeometry args={[0.4, 0.4, 0.05]} />
+            <meshStandardMaterial color="#22aa55" emissive="#22aa55" emissiveIntensity={0.3} />
+          </mesh>
+          <mesh position={[0, 1, 0.63]}>
+            <boxGeometry args={[0.15, 0.15, 0.05]} />
+            <meshStandardMaterial color="#ffffff" />
+          </mesh>
+          {/* Door */}
+          <Door position={[0, 0.35, 0.61]} size={[0.4, 0.7]} color="#1a1a1a" />
+          {/* Display windows */}
+          <Window position={[-0.45, 0.6, 0.61]} size={[0.35, 0.5]} color="#4a6a5a" />
+          <Window position={[0.45, 0.6, 0.61]} size={[0.35, 0.5]} color="#4a6a5a" />
+          {/* Awning */}
+          <mesh position={[0, 0.85, 0.75]} rotation={[-Math.PI / 6, 0, 0]} castShadow>
+            <boxGeometry args={[1.2, 0.05, 0.4]} />
+            <meshStandardMaterial color="#3a8a5a" flatShading />
           </mesh>
         </group>
       );
@@ -410,13 +783,42 @@ function LocationMarker({
           zIndexRange={[100, 0]}
           style={{ pointerEvents: "none" }}
         >
-          <div className="bg-stone-950/95 border border-stone-700 rounded px-2.5 py-1.5 text-xs text-stone-100 whitespace-nowrap shadow-xl">
-            <div className="font-bold text-amber-100">{def.label}</div>
-            <div className="text-[11px] text-stone-400">
-              {location.cleared
-                ? "Cleared"
-                : `${location.enemyCount} ${ENEMY_INFO[location.enemyType].label}`}
+          <div className="bg-stone-950/95 border border-stone-700 rounded px-3 py-2 text-xs text-stone-100 whitespace-nowrap shadow-xl">
+            <div className="font-bold text-amber-100 text-sm">{def.label}</div>
+            <div className="text-[11px] text-stone-400 mt-0.5">
+              {location.cleared ? (
+                <span className="text-emerald-400">✓ Cleared</span>
+              ) : (
+                <>
+                  {ENEMY_INFO[location.enemyType].icon} {location.enemyCount}{" "}
+                  {ENEMY_INFO[location.enemyType].label}
+                </>
+              )}
             </div>
+            {!location.cleared &&
+              Object.keys(location.loot).length > 0 && (
+                <div className="mt-1.5 pt-1.5 border-t border-stone-800">
+                  <div className="text-[9px] uppercase tracking-wide text-stone-500 mb-0.5">
+                    Expected Loot
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {Object.entries(location.loot).map(([k, v]) => (
+                      <span
+                        key={k}
+                        className="flex items-center gap-0.5 text-[11px] text-stone-200"
+                      >
+                        <span>
+                          {
+                            RESOURCE_INFO[k as keyof typeof RESOURCE_INFO]
+                              .icon
+                          }
+                        </span>
+                        <span className="font-medium">{v}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
           </div>
         </Html>
       )}
@@ -476,7 +878,7 @@ function Scene({
   return (
     <>
       <color attach="background" args={["#1a1410"]} />
-      <fog attach="fog" args={["#1a1410", 20, 45]} />
+      <fog attach="fog" args={["#1a1410", 45, 90]} />
 
       <ambientLight intensity={0.4} />
       <directionalLight
@@ -515,8 +917,8 @@ function Scene({
         enableRotate={false}
         enablePan={true}
         enableZoom={true}
-        minDistance={10}
-        maxDistance={40}
+        minDistance={12}
+        maxDistance={55}
         target={[0, 0, 0]}
         screenSpacePanning={false}
       />
@@ -588,7 +990,7 @@ export function WorldMapView() {
         </div>
         <Canvas
           shadows
-          camera={{ position: [0, 25, 0.1], fov: 45 }}
+          camera={{ position: [0, 22, 18], fov: 45 }}
           gl={{ antialias: false }}
         >
           <Scene
