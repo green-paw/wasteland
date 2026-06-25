@@ -117,6 +117,7 @@ interface GameStore extends GameState {
   assignSurvivorToTeam: (survivorId: string, teamId: string) => void;
   unassignSurvivorFromTeam: (survivorId: string) => void;
   assignTeamToLocation: (teamId: string, locationId: string) => void;
+  assignTeamToSalvage: (teamId: string, locationId: string) => void;
   clearTeamLocation: (teamId: string) => void;
 
   // survivor actions
@@ -316,6 +317,139 @@ function processEndDay(state: GameState): GameState {
       s.role = "onMission";
     });
 
+    // -------- Salvage mission: extract resources from cleared ruins --------
+    if (m.missionType === "salvage") {
+      const salvageRng = makeRng(
+        m.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) + day * 7919
+      );
+
+      // Total scavenge skill of the team determines daily yield.
+      // Each point of scavenge = 1 unit of "salvage work".
+      const totalScavenge = teamSurvivors.reduce(
+        (sum, s) => sum + s.skills.scavenging,
+        0
+      );
+      // Each survivor also has base 2 work capacity, so a lone scavenger still gets something
+      const salvageWork = totalScavenge + teamSurvivors.length * 2;
+
+      // Distribute the work across all resource types in the salvage pool proportionally.
+      // But the user wants materials to be the main yield — so we weight materials higher.
+      const poolEntries = Object.entries(location.salvagePool).filter(
+        ([, v]) => (v as number) > 0
+      ) as [ResourceType, number][];
+
+      const lootGained: Partial<Resources> = {};
+      let depletedThisRun = false;
+
+      if (poolEntries.length === 0) {
+        location.salvageDepleted = true;
+        depletedThisRun = true;
+        newLog.push({
+          day,
+          message: `${location.name} has nothing left to salvage.`,
+          type: "info",
+        });
+      } else {
+        // Materials get 50% of the work, rest distributed among other resources
+        const hasMaterials = poolEntries.some(([k]) => k === "materials");
+        const otherEntries = poolEntries.filter(([k]) => k !== "materials");
+
+        // Allocate work
+        const allocations: [ResourceType, number][] = [];
+        if (hasMaterials) {
+          const matsWork = salvageWork * 0.5;
+          allocations.push(["materials", matsWork]);
+        }
+        // Split remaining work equally among other resource types
+        if (otherEntries.length > 0) {
+          const otherWork = salvageWork * (hasMaterials ? 0.5 : 1);
+          const perType = otherWork / otherEntries.length;
+          for (const [k] of otherEntries) {
+            allocations.push([k, perType]);
+          }
+        }
+
+        // Apply each allocation, capped by remaining pool
+        for (const [k, work] of allocations) {
+          const remaining = location.salvagePool[k] ?? 0;
+          if (remaining <= 0) continue;
+          // Yield = work * random factor (0.8 - 1.2), at least 1
+          const yield_ = Math.max(
+            1,
+            Math.round(work * (0.8 + salvageRng() * 0.4))
+          );
+          const extracted = Math.min(remaining, yield_);
+          location.salvagePool[k] = remaining - extracted;
+          lootGained[k] = extracted;
+        }
+
+        // Check if pool is now empty
+        const totalRemaining = Object.values(location.salvagePool).reduce(
+          (sum, v) => sum + (v as number),
+          0
+        );
+        if (totalRemaining <= 0) {
+          location.salvageDepleted = true;
+          depletedThisRun = true;
+        }
+
+        // Log the salvage results
+        const lootSummary = Object.entries(lootGained)
+          .filter(([, v]) => (v as number) > 0)
+          .map(([k, v]) => `${v} ${k}`)
+          .join(", ");
+        if (lootSummary) {
+          newLog.push({
+            day,
+            message: `Team salvaged from ${location.name}: ${lootSummary}.`,
+            type: "success",
+          });
+        }
+        if (depletedThisRun) {
+          newLog.push({
+            day,
+            message: `${location.name} is fully salvaged — no resources left.`,
+            type: "warning",
+          });
+        }
+      }
+
+      // Apply loot to resources
+      resources = { ...resources };
+      for (const [k, v] of Object.entries(lootGained)) {
+        resources[k as ResourceType] += v as number;
+      }
+
+      // Reset team survivors to idle
+      teamSurvivors.forEach((s) => {
+        const updated = survivors.find((su) => su.id === s.id);
+        if (updated) {
+          updated.role = "idle";
+          updated.assignedTeamId = undefined;
+        }
+      });
+
+      // Clear team location
+      const salvageTeam = teams.find((t) => t.id === m.teamId);
+      if (salvageTeam) {
+        salvageTeam.locationId = null;
+      }
+
+      return {
+        ...m,
+        status: "completed",
+        result: {
+          success: true,
+          lootGained,
+          survivorsRecruited: [],
+          casualties: [],
+          injuries: [],
+          log: [],
+        },
+      };
+    }
+
+    // -------- Default: scout mission (combat + loot) --------
     const { result, log } = resolveMission(m, survivors, location, day);
     newLog.push(...log);
 
@@ -845,6 +979,61 @@ export const useGameStore = create<GameStore>((set, get) => ({
       t.id === teamId ? { ...t, locationId: null } : t
     );
     set({ teams, missions });
+  },
+
+  assignTeamToSalvage: (teamId, locationId) => {
+    const state = get();
+    const team = state.teams.find((t) => t.id === teamId);
+    if (!team || team.memberIds.length === 0) return;
+    const location = state.locations.find((l) => l.id === locationId);
+    if (!location) return;
+    // Only cleared locations can be salvaged
+    if (!location.cleared) return;
+    // Can't salvage a depleted location
+    if (location.salvageDepleted) return;
+
+    // Don't allow re-dispatching a team that already has a pending mission
+    const teamHasPending = state.missions.some(
+      (m) => m.teamId === teamId && m.status === "pending"
+    );
+    if (teamHasPending) return;
+
+    // If the same team is already salvaging THIS location, do nothing
+    const sameLocationMission = state.missions.find(
+      (m) =>
+        m.teamId === teamId &&
+        m.locationId === locationId &&
+        m.status === "pending" &&
+        m.missionType === "salvage"
+    );
+    if (sameLocationMission) return;
+
+    // create pending salvage mission
+    const mission: Mission = {
+      id: `salvage_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      teamId,
+      team: [...team.memberIds],
+      locationId,
+      status: "pending",
+      missionType: "salvage",
+    };
+
+    const teams = state.teams.map((t) =>
+      t.id === teamId ? { ...t, locationId } : t
+    );
+
+    set({
+      teams,
+      missions: [...state.missions, mission],
+      log: [
+        ...state.log,
+        {
+          day: state.day,
+          message: `Team "${team.name}" assigned to salvage ${location.name}.`,
+          type: "info",
+        },
+      ].slice(-80),
+    });
   },
 
   setSurvivorResting: (survivorId, resting) => {

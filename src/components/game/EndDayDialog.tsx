@@ -144,12 +144,23 @@ export function EndDayDialog({
                     const teamSurvivors = survivors.filter((s) =>
                       m.team.includes(s.id)
                     );
+                    const isSalvage = m.missionType === "salvage";
                     return (
                       <div
                         key={m.id}
-                        className="text-sm flex items-center gap-2 bg-stone-950/50 rounded p-2"
+                        className={`text-sm flex items-center gap-2 rounded p-2 ${
+                          isSalvage
+                            ? "bg-emerald-950/30 border border-emerald-900/50"
+                            : "bg-stone-950/50"
+                        }`}
                       >
-                        <span className="text-amber-300">→</span>
+                        <span
+                          className={
+                            isSalvage ? "text-emerald-300" : "text-amber-300"
+                          }
+                        >
+                          {isSalvage ? "⛏" : "→"}
+                        </span>
                         <span className="text-stone-200 font-medium">
                           {team?.name}
                         </span>
@@ -157,7 +168,9 @@ export function EndDayDialog({
                           ({teamSurvivors.length} survivor
                           {teamSurvivors.length !== 1 ? "s" : ""})
                         </span>
-                        <span className="text-stone-400">→</span>
+                        <span className="text-stone-400">
+                          {isSalvage ? "salvaging" : "scouting"}
+                        </span>
                         <span className="text-emerald-300">{loc?.name}</span>
                       </div>
                     );

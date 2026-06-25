@@ -77,6 +77,10 @@ export interface GameLocation {
   explored: boolean;
   cleared: boolean;
   distance: number;
+  // Salvage pool: after clearing, survivors can extract leftover resources
+  // from the ruins. Each salvage mission depletes the pool.
+  salvagePool: Partial<Resources>;
+  salvageDepleted: boolean;
 }
 
 export interface Mission {
@@ -85,6 +89,8 @@ export interface Mission {
   team: string[];
   locationId: string;
   status: "pending" | "inProgress" | "completed";
+  // "scout" = first exploration (combat + loot), "salvage" = extracting from cleared ruins
+  missionType?: "scout" | "salvage";
   result?: MissionResult;
 }
 

@@ -22,6 +22,8 @@ import {
   Flag,
   Target,
   Trash2,
+  Hammer,
+  Pickaxe,
 } from "lucide-react";
 
 // ---------- Helper: window ----------
@@ -669,8 +671,10 @@ function LocationMarker({
     }
   });
 
-  const markerColor = location.cleared
-    ? "#22c55e"
+  const markerColor = location.salvageDepleted
+    ? "#6b7280" // grey for depleted
+    : location.cleared
+    ? "#22c55e" // green for cleared (still has salvage)
     : hasMission
     ? "#fbbf24"
     : selected
@@ -819,6 +823,38 @@ function LocationMarker({
                   </div>
                 </div>
               )}
+            {location.cleared &&
+              !location.salvageDepleted &&
+              Object.keys(location.salvagePool).length > 0 && (
+                <div className="mt-1.5 pt-1.5 border-t border-stone-800">
+                  <div className="text-[9px] uppercase tracking-wide text-emerald-500 mb-0.5">
+                    Salvage Pool
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {Object.entries(location.salvagePool).map(([k, v]) => (
+                      <span
+                        key={k}
+                        className="flex items-center gap-0.5 text-[11px] text-emerald-200"
+                      >
+                        <span>
+                          {
+                            RESOURCE_INFO[k as keyof typeof RESOURCE_INFO]
+                              .icon
+                          }
+                        </span>
+                        <span className="font-medium">{v as number}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            {location.cleared && location.salvageDepleted && (
+              <div className="mt-1.5 pt-1.5 border-t border-stone-800">
+                <div className="text-[10px] text-stone-500 italic">
+                  Fully salvaged
+                </div>
+              </div>
+            )}
           </div>
         </Html>
       )}
@@ -840,7 +876,11 @@ function MissionLines() {
         const loc = locations.find((l) => l.id === m.locationId);
         if (!loc) return null;
         const team = teams.find((t) => t.id === m.teamId);
-        const teamColor = team?.name?.toLowerCase().includes("alpha")
+        // Salvage missions use a green dashed line, scout missions use team color
+        const isSalvage = m.missionType === "salvage";
+        const teamColor = isSalvage
+          ? "#22c55e"
+          : team?.name?.toLowerCase().includes("alpha")
           ? "#fbbf24"
           : team?.name?.toLowerCase().includes("bravo")
           ? "#60a5fa"
@@ -933,6 +973,7 @@ export function WorldMapView() {
   const survivors = useGameStore((s) => s.survivors);
   const missions = useGameStore((s) => s.missions);
   const assignTeamToLocation = useGameStore((s) => s.assignTeamToLocation);
+  const assignTeamToSalvage = useGameStore((s) => s.assignTeamToSalvage);
   const clearTeamLocation = useGameStore((s) => s.clearTeamLocation);
   const createTeam = useGameStore((s) => s.createTeam);
 
@@ -944,6 +985,10 @@ export function WorldMapView() {
   const selectedLocation = locations.find((l) => l.id === selectedLocationId);
   const selectedTeam = teams.find((t) => t.id === selectedTeamId);
 
+  // Determine mission type based on location state
+  const isSalvageMission =
+    selectedLocation?.cleared && !selectedLocation?.salvageDepleted;
+
   const handleAssign = () => {
     if (!selectedTeamId || !selectedLocationId) return;
     const team = teams.find((t) => t.id === selectedTeamId);
@@ -953,7 +998,11 @@ export function WorldMapView() {
       (m) => m.teamId === selectedTeamId && m.status === "pending"
     );
     if (teamHasPending) return;
-    assignTeamToLocation(selectedTeamId, selectedLocationId);
+    if (isSalvageMission) {
+      assignTeamToSalvage(selectedTeamId, selectedLocationId);
+    } else {
+      assignTeamToLocation(selectedTeamId, selectedLocationId);
+    }
     // Clear team selection so the player must pick again (the just-dispatched team is now blocked)
     setSelectedTeamId(null);
   };
@@ -986,6 +1035,10 @@ export function WorldMapView() {
           <div className="flex items-center gap-1">
             <div className="w-2 h-2 rounded-full bg-green-500" />
             <span className="text-[10px] text-stone-400">Cleared</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-2 h-2 rounded-full bg-stone-500" />
+            <span className="text-[10px] text-stone-400">Depleted</span>
           </div>
         </div>
         <Canvas
@@ -1072,10 +1125,37 @@ export function WorldMapView() {
                 </div>
               ) : (
                 <div className="bg-emerald-950/30 rounded p-2 border border-emerald-900/50">
-                  <div className="text-xs text-emerald-300 flex items-center gap-1.5">
+                  <div className="text-xs text-emerald-300 flex items-center gap-1.5 mb-1">
                     <Package className="w-3 h-3" />
-                    Cleared — minimal scavenging left
+                    {selectedLocation.salvageDepleted
+                      ? "Depleted — nothing left to salvage"
+                      : "Cleared — ready to salvage ruins"}
                   </div>
+                  {!selectedLocation.salvageDepleted &&
+                    Object.keys(selectedLocation.salvagePool).length > 0 && (
+                      <div className="mt-1.5">
+                        <div className="text-[9px] uppercase tracking-wide text-stone-500 mb-1">
+                          Salvage Pool (remaining)
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {Object.entries(selectedLocation.salvagePool).map(
+                            ([k, v]) => (
+                              <Badge
+                                key={k}
+                                variant="outline"
+                                className="text-[10px] border-emerald-800 bg-emerald-950/30 text-emerald-300"
+                              >
+                                {
+                                  RESOURCE_INFO[k as keyof typeof RESOURCE_INFO]
+                                    .icon
+                                }{" "}
+                                {v as number} {k}
+                              </Badge>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
                 </div>
               )}
 
@@ -1110,11 +1190,24 @@ export function WorldMapView() {
               </div>
             </div>
 
-            {/* Assign team */}
+            {/* Assign team / Salvage */}
             <div className="mt-3 pt-3 border-t border-stone-800">
-              <div className="text-[10px] uppercase tracking-wide text-stone-500 mb-1.5">
-                Dispatch Team
-              </div>
+              {isSalvageMission ? (
+                <>
+                  <div className="text-[10px] uppercase tracking-wide text-emerald-500 mb-1.5 flex items-center gap-1">
+                    <Pickaxe className="w-3 h-3" />
+                    Salvage Operation
+                  </div>
+                  <div className="text-[11px] text-stone-400 mb-2 leading-snug">
+                    Send a team to extract resources from the ruins. Yield
+                    scales with the team&apos;s total Scavenge skill.
+                  </div>
+                </>
+              ) : (
+                <div className="text-[10px] uppercase tracking-wide text-stone-500 mb-1.5">
+                  Dispatch Team
+                </div>
+              )}
               {teams.length === 0 ? (
                 <div className="text-xs text-stone-500 mb-2">
                   No teams yet. Create one in the Survivors tab.
@@ -1128,6 +1221,11 @@ export function WorldMapView() {
                     const hasMission = pendingMissions.some(
                       (m) => m.teamId === t.id
                     );
+                    // For salvage, show the team's total scavenge skill
+                    const teamScavenge = teamSurvivors.reduce(
+                      (sum, s) => sum + s.skills.scavenging,
+                      0
+                    );
                     return (
                       <button
                         key={t.id}
@@ -1135,7 +1233,9 @@ export function WorldMapView() {
                         disabled={hasMission || teamSurvivors.length === 0}
                         className={`w-full text-left p-2 rounded text-xs border transition-colors ${
                           selectedTeamId === t.id
-                            ? "border-amber-600 bg-amber-950/30 text-amber-200"
+                            ? isSalvageMission
+                              ? "border-emerald-600 bg-emerald-950/30 text-emerald-200"
+                              : "border-amber-600 bg-amber-950/30 text-amber-200"
                             : hasMission
                             ? "border-stone-800 bg-stone-950/50 text-stone-600 cursor-not-allowed"
                             : teamSurvivors.length === 0
@@ -1147,6 +1247,11 @@ export function WorldMapView() {
                           <span className="font-medium">{t.name}</span>
                           <span className="text-[10px] text-stone-500">
                             {teamSurvivors.length} ready
+                            {isSalvageMission && (
+                              <span className="ml-1 text-emerald-500">
+                                · scavenge {teamScavenge}
+                              </span>
+                            )}
                           </span>
                         </div>
                         {hasMission && (
@@ -1159,24 +1264,46 @@ export function WorldMapView() {
                   })}
                 </div>
               )}
-              <Button
-                size="sm"
-                className="w-full bg-amber-700 hover:bg-amber-600 text-amber-50"
-                disabled={
-                  !selectedTeamId ||
-                  // Disable if selected team already has a pending mission
-                  (selectedTeamId
-                    ? missions.some(
-                        (m) =>
-                          m.teamId === selectedTeamId && m.status === "pending"
-                      )
-                    : true)
-                }
-                onClick={handleAssign}
-              >
-                <Target className="w-3 h-3 mr-1" />
-                Dispatch Team
-              </Button>
+              {isSalvageMission ? (
+                <Button
+                  size="sm"
+                  className="w-full bg-emerald-700 hover:bg-emerald-600 text-emerald-50"
+                  disabled={
+                    !selectedTeamId ||
+                    (selectedTeamId
+                      ? missions.some(
+                          (m) =>
+                            m.teamId === selectedTeamId &&
+                            m.status === "pending"
+                        )
+                      : true)
+                  }
+                  onClick={handleAssign}
+                >
+                  <Hammer className="w-3 h-3 mr-1" />
+                  Send Salvage Team
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  className="w-full bg-amber-700 hover:bg-amber-600 text-amber-50"
+                  disabled={
+                    !selectedTeamId ||
+                    // Disable if selected team already has a pending mission
+                    (selectedTeamId
+                      ? missions.some(
+                          (m) =>
+                            m.teamId === selectedTeamId &&
+                            m.status === "pending"
+                        )
+                      : true)
+                  }
+                  onClick={handleAssign}
+                >
+                  <Target className="w-3 h-3 mr-1" />
+                  Dispatch Team
+                </Button>
+              )}
             </div>
           </Card>
         ) : (
@@ -1218,18 +1345,41 @@ export function WorldMapView() {
                   const teamSurvivors = survivors.filter((s) =>
                     m.team.includes(s.id)
                   );
+                  const isSalvage = m.missionType === "salvage";
                   return (
                     <div
                       key={m.id}
-                      className="bg-stone-950/50 border border-stone-800 rounded p-2"
+                      className={`border rounded p-2 ${
+                        isSalvage
+                          ? "bg-emerald-950/30 border-emerald-900/50"
+                          : "bg-stone-950/50 border-stone-800"
+                      }`}
                     >
                       <div className="flex items-center justify-between">
                         <div className="min-w-0">
-                          <div className="text-xs font-medium text-amber-200 truncate">
-                            {team?.name}
+                          <div className="flex items-center gap-1">
+                            {isSalvage ? (
+                              <Hammer className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                            ) : (
+                              <Target className="w-3 h-3 text-amber-400 flex-shrink-0" />
+                            )}
+                            <div
+                              className={`text-xs font-medium truncate ${
+                                isSalvage
+                                  ? "text-emerald-200"
+                                  : "text-amber-200"
+                              }`}
+                            >
+                              {team?.name}
+                            </div>
                           </div>
-                          <div className="text-[10px] text-stone-400">
-                            {teamSurvivors.length} surv → {loc?.name}
+                          <div className="text-[10px] text-stone-400 ml-4">
+                            {isSalvage ? "Salvaging" : "Scouting"} →{" "}
+                            {loc?.name}
+                          </div>
+                          <div className="text-[10px] text-stone-500 ml-4">
+                            {teamSurvivors.length} survivor
+                            {teamSurvivors.length !== 1 ? "s" : ""}
                           </div>
                         </div>
                         <Button

@@ -31,6 +31,23 @@ export function randInt(rng: () => number, min: number, max: number): number {
   return Math.floor(rng() * (max - min + 1)) + min;
 }
 
+// ---------- Helper: generate salvage pool from salvage table ----------
+function generateSalvagePool(
+  rng: () => number,
+  salvageTable: Partial<Record<ResourceType, number>>
+): Partial<Resources> {
+  const pool: Partial<Resources> = {};
+  for (const [k, weight] of Object.entries(salvageTable)) {
+    const base = weight as number;
+    // Salvage pool is the full extractable amount — vary it ±20%
+    pool[k as ResourceType] = Math.max(
+      1,
+      Math.round(base * (0.8 + rng() * 0.4))
+    );
+  }
+  return pool;
+}
+
 // ---------- World Map Generation ----------
 export function generateWorld(seed: number): GameLocation[] {
   const rng = makeRng(seed);
@@ -56,6 +73,8 @@ export function generateWorld(seed: number): GameLocation[] {
       loot[k as ResourceType] = Math.max(1, Math.round((weight as number) * (0.6 + rng() * 0.9)));
     }
 
+    const salvagePool = generateSalvagePool(rng, def.salvageTable);
+
     locations.push({
       id: `loc_safe_${i}_${Math.floor(rng() * 100000)}`,
       name: def.label,
@@ -65,6 +84,8 @@ export function generateWorld(seed: number): GameLocation[] {
       enemyType,
       enemyCount,
       loot,
+      salvagePool,
+      salvageDepleted: false,
       survivorChance: def.survivorChance,
       explored: false,
       cleared: false,
@@ -112,6 +133,7 @@ export function generateWorld(seed: number): GameLocation[] {
       );
     }
 
+    const salvagePool = generateSalvagePool(rng, def.salvageTable);
     const survivorChance = def.survivorChance;
     const distance = Math.max(0.5, Math.round(radius / 7) * 0.5); // 0.5, 1, 1.5
 
@@ -124,6 +146,8 @@ export function generateWorld(seed: number): GameLocation[] {
       enemyType,
       enemyCount,
       loot,
+      salvagePool,
+      salvageDepleted: false,
       survivorChance,
       explored: false,
       cleared: false,

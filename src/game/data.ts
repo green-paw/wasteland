@@ -136,6 +136,9 @@ export interface LocationDef {
   icon: string;
   description: string;
   lootTable: Partial<Record<ResourceType, number>>;
+  // Salvage pool: total resources extractable from ruins after clearing.
+  // Materials always present (rubble), plus building-specific extras.
+  salvageTable: Partial<Record<ResourceType, number>>;
   baseDanger: number;
   enemyTypes: EnemyType[];
   survivorChance: number;
@@ -149,6 +152,7 @@ export const LOCATION_DEFS: Record<LocationType, LocationDef> = {
     icon: "🏚️",
     description: "A collapsed home. Usually low danger, modest supplies.",
     lootTable: { food: 3, water: 2, materials: 4 },
+    salvageTable: { materials: 15, food: 5, water: 3 },
     baseDanger: 1,
     enemyTypes: ["zombies", "wild_dogs"],
     survivorChance: 0.25,
@@ -160,6 +164,7 @@ export const LOCATION_DEFS: Record<LocationType, LocationDef> = {
     icon: "🛒",
     description: "Once a food store — picked clean but still worth checking.",
     lootTable: { food: 8, water: 4, materials: 2 },
+    salvageTable: { materials: 12, food: 20, water: 8 },
     baseDanger: 3,
     enemyTypes: ["zombies", "raiders"],
     survivorChance: 0.15,
@@ -171,6 +176,7 @@ export const LOCATION_DEFS: Record<LocationType, LocationDef> = {
     icon: "🏥",
     description: "Risky but rich in medicine. Walkers everywhere.",
     lootTable: { medicine: 8, water: 2, materials: 2 },
+    salvageTable: { materials: 15, medicine: 18, water: 5 },
     baseDanger: 4,
     enemyTypes: ["zombies", "mutants"],
     survivorChance: 0.1,
@@ -182,6 +188,7 @@ export const LOCATION_DEFS: Record<LocationType, LocationDef> = {
     icon: "⛽",
     description: "Fuel and snacks. Bandits like it here too.",
     lootTable: { fuel: 6, food: 2, water: 1 },
+    salvageTable: { materials: 10, fuel: 22, food: 4 },
     baseDanger: 2,
     enemyTypes: ["raiders", "wild_dogs"],
     survivorChance: 0.15,
@@ -193,6 +200,7 @@ export const LOCATION_DEFS: Record<LocationType, LocationDef> = {
     icon: "🏭",
     description: "Construction materials in bulk. Heavy raider presence.",
     lootTable: { materials: 8, fuel: 2, ammo: 2 },
+    salvageTable: { materials: 30, fuel: 6, ammo: 4 },
     baseDanger: 3,
     enemyTypes: ["raiders"],
     survivorChance: 0.1,
@@ -204,6 +212,7 @@ export const LOCATION_DEFS: Record<LocationType, LocationDef> = {
     icon: "🎖️",
     description: "Highly dangerous. Ammo and fuel to be had.",
     lootTable: { ammo: 8, fuel: 4, medicine: 2 },
+    salvageTable: { materials: 18, ammo: 20, fuel: 12, medicine: 6 },
     baseDanger: 5,
     enemyTypes: ["mutants", "raiders"],
     survivorChance: 0.2,
@@ -215,6 +224,7 @@ export const LOCATION_DEFS: Record<LocationType, LocationDef> = {
     icon: "🏫",
     description: "Children are gone. Walkers roam the halls.",
     lootTable: { food: 4, materials: 4, medicine: 1 },
+    salvageTable: { materials: 18, food: 8, medicine: 3 },
     baseDanger: 2,
     enemyTypes: ["zombies"],
     survivorChance: 0.3,
@@ -226,6 +236,7 @@ export const LOCATION_DEFS: Record<LocationType, LocationDef> = {
     icon: "⛪",
     description: "Survivors sometimes shelter here. Quiet but creepy.",
     lootTable: { food: 2, medicine: 2, materials: 1 },
+    salvageTable: { materials: 12, medicine: 6, food: 4 },
     baseDanger: 1,
     enemyTypes: ["zombies"],
     survivorChance: 0.45,
@@ -237,6 +248,7 @@ export const LOCATION_DEFS: Record<LocationType, LocationDef> = {
     icon: "⚙️",
     description: "Industrial scrap. Mutants nest in the basement.",
     lootTable: { materials: 6, fuel: 3, ammo: 1 },
+    salvageTable: { materials: 25, fuel: 10, ammo: 3 },
     baseDanger: 4,
     enemyTypes: ["mutants", "wild_dogs"],
     survivorChance: 0.1,
@@ -248,6 +260,7 @@ export const LOCATION_DEFS: Record<LocationType, LocationDef> = {
     icon: "💊",
     description: "Small but medicine-rich. Walkers inside.",
     lootTable: { medicine: 6, food: 1, water: 1 },
+    salvageTable: { materials: 8, medicine: 15, water: 3 },
     baseDanger: 2,
     enemyTypes: ["zombies"],
     survivorChance: 0.2,
