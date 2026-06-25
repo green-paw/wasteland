@@ -778,8 +778,10 @@ function LocationMarker({
         </>
       )}
 
-      {/* Hover label — fixed screen size, follows the 3D position */}
-      {(hovered || selected) && (
+      {/* Hover label — fixed screen size, follows the 3D position.
+          Only shown while actively hovering (not when selected), so the
+          tooltip disappears after the player clicks the building. */}
+      {hovered && (
         <Html
           position={[0, 3.5, 0]}
           center

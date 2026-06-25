@@ -311,11 +311,14 @@ function processEndDay(state: GameState): GameState {
     const location = locations.find((l) => l.id === m.locationId);
     if (!location) return { ...m, status: "completed", result: { success: false, lootGained: {}, survivorsRecruited: [], casualties: [], injuries: [], log: ["Location not found."] } };
 
-    // Survivors on mission can't rest/eat at base this turn — but they do consume travel rations
     const teamSurvivors = survivors.filter((s) => m.team.includes(s.id));
-    teamSurvivors.forEach((s) => {
-      s.role = "onMission";
-    });
+    // Only scout missions send survivors "onMission" (travel rations, no base food).
+    // Salvage missions are persistent — survivors stay assigned and eat from base stores.
+    if (m.missionType !== "salvage") {
+      teamSurvivors.forEach((s) => {
+        s.role = "onMission";
+      });
+    }
 
     // -------- Salvage mission: extract resources from cleared ruins --------
     if (m.missionType === "salvage") {
@@ -408,7 +411,7 @@ function processEndDay(state: GameState): GameState {
         if (depletedThisRun) {
           newLog.push({
             day,
-            message: `${location.name} is fully salvaged — no resources left.`,
+            message: `${location.name} is fully salvaged — team is returning home.`,
             type: "warning",
           });
         }
@@ -420,33 +423,41 @@ function processEndDay(state: GameState): GameState {
         resources[k as ResourceType] += v as number;
       }
 
-      // Reset team survivors to idle
-      teamSurvivors.forEach((s) => {
-        const updated = survivors.find((su) => su.id === s.id);
-        if (updated) {
-          updated.role = "idle";
-          updated.assignedTeamId = undefined;
-        }
-      });
+      // If depleted, the team returns home (mission completed).
+      // Otherwise, the team STAYS assigned — the mission remains pending for the next day.
+      if (depletedThisRun) {
+        // Reset team survivors to idle
+        teamSurvivors.forEach((s) => {
+          const updated = survivors.find((su) => su.id === s.id);
+          if (updated) {
+            updated.role = "idle";
+            updated.assignedTeamId = undefined;
+          }
+        });
 
-      // Clear team location
-      const salvageTeam = teams.find((t) => t.id === m.teamId);
-      if (salvageTeam) {
-        salvageTeam.locationId = null;
+        // Clear team location
+        const salvageTeam = teams.find((t) => t.id === m.teamId);
+        if (salvageTeam) {
+          salvageTeam.locationId = null;
+        }
+
+        return {
+          ...m,
+          status: "completed",
+          result: {
+            success: true,
+            lootGained,
+            survivorsRecruited: [],
+            casualties: [],
+            injuries: [],
+            log: [],
+          },
+        };
       }
 
-      return {
-        ...m,
-        status: "completed",
-        result: {
-          success: true,
-          lootGained,
-          survivorsRecruited: [],
-          casualties: [],
-          injuries: [],
-          log: [],
-        },
-      };
+      // Not depleted: keep the mission pending so it runs again next day.
+      // Survivors stay in their current role (working), team stays assigned.
+      return m;
     }
 
     // -------- Default: scout mission (combat + loot) --------
