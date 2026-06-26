@@ -75,7 +75,8 @@ function weightedPick(
 export function generateAreaLocations(
   areaId: string,
   areaType: AreaType,
-  seed: number
+  seed: number,
+  isStart = false
 ): GameLocation[] {
   const rng = makeRng(seed);
   const def = AREA_TYPE_DEFS[areaType];
@@ -83,7 +84,9 @@ export function generateAreaLocations(
   const locations: GameLocation[] = [];
   const usedAngles: number[] = [];
 
-  // Force at least 1 safe location near the area's base (danger 1-2)
+  // Force at least 1 safe location near the area's base (danger 1-2).
+  // For the starting area, this location is guaranteed to have exactly 1 enemy
+  // so the player can clear it and claim it as a base on day 1.
   const safeTypes: LocationType[] = ["abandoned_house", "church", "school", "pharmacy"];
   {
     const type = pick(rng, safeTypes);
@@ -92,7 +95,8 @@ export function generateAreaLocations(
     const radius = 6 + rng() * 3;
     const danger = Math.min(2, locDef.baseDanger);
     const enemyType = pick(rng, locDef.enemyTypes);
-    const enemyCount = danger + randInt(rng, 0, 1);
+    // Starting area: exactly 1 enemy. Other areas: danger + 0-1.
+    const enemyCount = isStart ? 1 : danger + randInt(rng, 0, 1);
     const loot: Partial<Resources> = {};
     for (const [k, weight] of Object.entries(locDef.lootTable)) {
       loot[k as ResourceType] = Math.max(
@@ -220,11 +224,14 @@ export function generateWorld(seed: number): {
   // Start area at (0,0)
   const startArea = makeAreaShell([0, 0]);
   startArea.discovered = true;
-  startArea.hasBase = true;
+  // NOTE: hasBase stays false — the player must clear a location and claim it.
+  // The starting area gets guaranteed 1 easy location (1 enemy) via isStart.
+  startArea.hasBase = false;
   startArea.locations = generateAreaLocations(
     startArea.id,
     startArea.type,
-    seed + 1
+    seed + 1,
+    true // isStart → guaranteed 1 easy location
   );
 
   areas[startArea.id] = startArea;

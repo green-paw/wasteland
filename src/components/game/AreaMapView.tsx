@@ -102,6 +102,71 @@ function Terrain() {
 }
 
 // ---------- Low-poly base buildings (more detailed) ----------
+// ---------- Camp tent (shown when no base is claimed yet) ----------
+function CampTent() {
+  // A small triangular tent with a campfire — the survivor's makeshift home
+  // until they clear and claim a real building as a base.
+  return (
+    <group position={[0, 0, 0]}>
+      {/* Tent body — triangular prism (using a 3-sided cylinder) */}
+      <mesh position={[0, 0.5, 0]} rotation={[0, Math.PI / 6, 0]} castShadow>
+        <cylinderGeometry args={[0.9, 0.9, 1, 3]} />
+        <meshStandardMaterial color="#7a5a3a" flatShading roughness={1} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Tent floor edge — darker strip */}
+      <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.7, 1.0, 3]} />
+        <meshStandardMaterial color="#3a2a1a" flatShading side={THREE.DoubleSide} />
+      </mesh>
+      {/* Tent opening — dark triangle in front */}
+      <mesh position={[0, 0.5, 0.91]}>
+        <planeGeometry args={[0.4, 0.7]} />
+        <meshStandardMaterial color="#1a0a00" side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Campfire ring — stones */}
+      {[
+        [1.4, 0.05, 0.8],
+        [1.5, 0.05, 1.0],
+        [1.6, 0.05, 0.8],
+        [1.45, 0.05, 1.15],
+      ].map((pos, i) => (
+        <mesh key={i} position={pos as [number, number, number]}>
+          <sphereGeometry args={[0.08, 6, 6]} />
+          <meshStandardMaterial color="#6a6a6a" flatShading />
+        </mesh>
+      ))}
+      {/* Campfire logs */}
+      <mesh position={[1.5, 0.08, 0.95]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.05, 0.05, 0.4, 6]} />
+        <meshStandardMaterial color="#4a3a1a" flatShading />
+      </mesh>
+      <mesh position={[1.5, 0.08, 0.95]} rotation={[Math.PI / 2, 0, Math.PI / 3]} castShadow>
+        <cylinderGeometry args={[0.05, 0.05, 0.4, 6]} />
+        <meshStandardMaterial color="#3a2a1a" flatShading />
+      </mesh>
+      {/* Campfire flame — emissive cone */}
+      <mesh position={[1.5, 0.25, 0.95]}>
+        <coneGeometry args={[0.12, 0.35, 6]} />
+        <meshStandardMaterial color="#ff8800" emissive="#ff6600" emissiveIntensity={0.8} />
+      </mesh>
+      {/* Point light from the fire */}
+      <pointLight position={[1.5, 0.4, 0.95]} intensity={1.2} distance={6} color="#ffaa55" />
+
+      {/* Simple flag pole to mark the camp */}
+      <mesh position={[0, 1.6, 0]}>
+        <cylinderGeometry args={[0.03, 0.03, 1.2, 6]} />
+        <meshStandardMaterial color="#2a2a2a" />
+      </mesh>
+      <mesh position={[0.15, 2.0, 0]}>
+        <planeGeometry args={[0.3, 0.2]} />
+        <meshStandardMaterial color="#aa6633" side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+}
+
+// ---------- Base buildings (full base, shown after claiming) ----------
 function BaseBuildings() {
   return (
     <group position={[0, 0, 0]}>
@@ -654,11 +719,13 @@ function LocationMarker({
   selected,
   onClick,
   hasMission,
+  isBase,
 }: {
   location: GameLocation;
   selected: boolean;
   onClick: () => void;
   hasMission: boolean;
+  isBase?: boolean;
 }) {
   const def = LOCATION_DEFS[location.type];
   const ringRef = useRef<THREE.Mesh>(null);
@@ -672,7 +739,9 @@ function LocationMarker({
     }
   });
 
-  const markerColor = location.salvageDepleted
+  const markerColor = isBase
+    ? "#f59e0b" // amber/gold for the claimed base
+    : location.salvageDepleted
     ? "#6b7280" // grey for depleted
     : location.cleared
     ? "#22c55e" // green for cleared (still has salvage)
@@ -748,7 +817,7 @@ function LocationMarker({
       </mesh>
 
       {/* Cleared indicator — green ring on the ground + floating checkmark flag */}
-      {location.cleared && (
+      {location.cleared && !isBase && (
         <>
           {/* Persistent green ring on the ground (always visible from top) */}
           <mesh
@@ -779,6 +848,47 @@ function LocationMarker({
         </>
       )}
 
+      {/* Base indicator — golden house icon floating above the claimed base */}
+      {isBase && (
+        <group position={[0, 4.2, 0]}>
+          {/* Pole */}
+          <mesh position={[0, -1.0, 0]}>
+            <cylinderGeometry args={[0.04, 0.04, 2.0, 6]} />
+            <meshBasicMaterial color="#1a1a1a" />
+          </mesh>
+          {/* House icon — small house floating above the base building */}
+          <group position={[0, 0.2, 0]} scale={1.1}>
+            {/* House body */}
+            <mesh position={[0, 0, 0]} castShadow>
+              <boxGeometry args={[0.5, 0.45, 0.5]} />
+              <meshStandardMaterial
+                color="#fbbf24"
+                emissive="#f59e0b"
+                emissiveIntensity={0.4}
+                flatShading
+              />
+            </mesh>
+            {/* House roof — pyramid */}
+            <mesh position={[0, 0.42, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+              <coneGeometry args={[0.42, 0.35, 4]} />
+              <meshStandardMaterial
+                color="#b45309"
+                emissive="#92400e"
+                emissiveIntensity={0.3}
+                flatShading
+              />
+            </mesh>
+            {/* House door */}
+            <mesh position={[0, -0.05, 0.26]}>
+              <planeGeometry args={[0.15, 0.25]} />
+              <meshBasicMaterial color="#451a03" side={THREE.DoubleSide} />
+            </mesh>
+          </group>
+          {/* "BASE" glow point light */}
+          <pointLight position={[0, 0.2, 0]} intensity={0.6} distance={4} color="#fbbf24" />
+        </group>
+      )}
+
       {/* Hover label — fixed screen size, follows the 3D position.
           Only shown while actively hovering (not when selected), so the
           tooltip disappears after the player clicks the building. */}
@@ -791,9 +901,14 @@ function LocationMarker({
           style={{ pointerEvents: "none" }}
         >
           <div className="bg-stone-950/95 border border-stone-700 rounded px-3 py-2 text-xs text-stone-100 whitespace-nowrap shadow-xl">
-            <div className="font-bold text-amber-100 text-sm">{def.label}</div>
+            <div className="font-bold text-amber-100 text-sm flex items-center gap-1">
+              {isBase && <span className="text-amber-400">🏠</span>}
+              {def.label}
+            </div>
             <div className="text-[11px] text-stone-400 mt-0.5">
-              {location.cleared ? (
+              {isBase ? (
+                <span className="text-amber-400 font-semibold">Your Base</span>
+              ) : location.cleared ? (
                 <span className="text-emerald-400">✓ Cleared</span>
               ) : (
                 <>
@@ -889,11 +1004,19 @@ function MissionLines() {
           : team?.name?.toLowerCase().includes("bravo")
           ? "#60a5fa"
           : "#a78bfa";
+        // Origin: if the area has a claimed base, lines start from the base
+        // building's position. Otherwise they start from the camp tent at (0,0,0).
+        const baseLoc = area?.baseLocationId
+          ? locations.find((l) => l.id === area.baseLocationId)
+          : null;
+        const origin: [number, number, number] = baseLoc
+          ? [baseLoc.position[0], 0.5, baseLoc.position[2]]
+          : [0, 0.5, 0];
         return (
           <Line
             key={m.id}
             points={[
-              [0, 0.5, 0],
+              origin,
               [loc.position[0], 0.5, loc.position[2]],
             ]}
             color={teamColor}
@@ -935,7 +1058,10 @@ function Scene({
       <hemisphereLight args={["#9a8a6a", "#2a2a1a", 0.4]} />
 
       <Terrain />
-      <BaseBuildings />
+      {/* Show a small camp tent while no base is claimed; once a location is
+          claimed as base, it becomes the base (marked with a house icon in
+          its LocationMarker) and the tent disappears. */}
+      {!area?.hasBase && <CampTent />}
 
       {locations.map((loc) => {
         const hasMission = missions.some(
@@ -947,6 +1073,7 @@ function Scene({
             location={loc}
             selected={selectedLocationId === loc.id}
             hasMission={hasMission}
+            isBase={area?.baseLocationId === loc.id}
             onClick={() =>
               onSelectLocation(
                 selectedLocationId === loc.id ? null : loc.id
@@ -1056,6 +1183,10 @@ export function AreaMapView() {
           <div className="flex items-center gap-1">
             <div className="w-2 h-2 rounded-full bg-stone-500" />
             <span className="text-[10px] text-stone-400">Depleted</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-amber-400">🏠</span>
+            <span className="text-[10px] text-stone-400">Base</span>
           </div>
         </div>
         <Canvas
@@ -1230,7 +1361,6 @@ export function AreaMapView() {
             )}
 
             {/* Assign team / Salvage */}
-            {area?.hasBase && (
             <div className="mt-3 pt-3 border-t border-stone-800">
               {isSalvageMission ? (
                 <>
@@ -1345,7 +1475,6 @@ export function AreaMapView() {
                 </Button>
               )}
             </div>
-            )}
           </Card>
         ) : (
           <Card className="bg-stone-900/40 border-stone-800 border-dashed p-6 text-center">

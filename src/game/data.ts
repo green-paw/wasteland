@@ -523,8 +523,10 @@ export function getNeighborHexes(hex: [number, number]): [number, number][] {
 
 export function hexToPixel(hex: [number, number], size: number): [number, number] {
   const [q, r] = hex;
-  const x = size * (3 / 2) * q;
-  const y = size * Math.sqrt(3) * (r + q / 2);
+  // Pointy-top orientation: hexes share horizontal edges with their
+  // east/west neighbors and slanted edges with the others.
+  const x = size * Math.sqrt(3) * (q + r / 2);
+  const y = size * (3 / 2) * r;
   return [x, y];
 }
 

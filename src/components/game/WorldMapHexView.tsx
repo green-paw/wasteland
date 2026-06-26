@@ -47,6 +47,7 @@ import {
   Eye,
   EyeOff,
   Clock,
+  MapPin,
 } from "lucide-react";
 
 // ---------------- Hex grid constants ----------------
@@ -165,15 +166,12 @@ export function WorldMapHexView() {
 
   // Click handlers ----------------------------------------------------------
   const handleHexClick = (area: Area) => {
+    // Just select the area in the side panel. Don't auto-switch current area,
+    // so the player can use the "Send Survivors" action on discovered neighbors.
     setSelectedAreaId(area.id);
-    if (!area.discovered) {
-      // Only allow expeditions from the current area to its neighbors
-      if (isAdjacentHex(currentArea.hex, area.hex)) {
-        setExpeditionTarget(area);
-      }
-    } else {
-      // Switch the player's current area to this discovered area
-      useGameStore.getState().setCurrentArea(area.id);
+    // Only undiscovered neighbors auto-open the expedition dialog
+    if (!area.discovered && isAdjacentHex(currentArea.hex, area.hex)) {
+      setExpeditionTarget(area);
     }
   };
 
@@ -536,6 +534,18 @@ function AreaDetails({
         )}
       </div>
 
+      {/* Switch to this area (if discovered and not current) */}
+      {area.discovered && !isCurrent && (
+        <Button
+          onClick={() => useGameStore.getState().setCurrentArea(area.id)}
+          size="sm"
+          className="w-full bg-emerald-700 hover:bg-emerald-600 text-emerald-50"
+        >
+          <MapPin className="w-4 h-4 mr-1.5" />
+          Switch to {area.name}
+        </Button>
+      )}
+
       {/* Survivor count (only meaningful once discovered) */}
       {area.discovered && (
         <div className="flex items-center gap-2 text-sm">
@@ -590,6 +600,29 @@ function AreaDetails({
           >
             <Footprints className="w-4 h-4 mr-1.5" />
             Send Expedition
+          </Button>
+        </div>
+      )}
+
+      {/* Discovered neighbor — allow sending survivors/resources back and forth */}
+      {area.discovered && isNeighborOfCurrent && !isCurrent && (
+        <div className="rounded-md border border-sky-900/60 bg-sky-950/20 p-2.5 space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-300">
+            <Footprints className="w-3.5 h-3.5" />
+            Discovered Neighbor
+          </div>
+          <div className="text-[11px] text-stone-400 leading-relaxed">
+            Send survivors and resources from your current area to{" "}
+            <span className="text-stone-200">{area.name}</span>. They will
+            arrive tomorrow.
+          </div>
+          <Button
+            onClick={onSendExpedition}
+            size="sm"
+            className="w-full bg-sky-700 hover:bg-sky-600 text-sky-50"
+          >
+            <Footprints className="w-4 h-4 mr-1.5" />
+            Send Survivors / Resources
           </Button>
         </div>
       )}
