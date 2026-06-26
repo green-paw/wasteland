@@ -2,11 +2,21 @@
 
 import { useGameStore, selectSurvivorCapacity } from "@/game/store";
 import { getMaxTeamSize } from "@/game/data";
-import { Survivor, SurvivorStatus } from "@/game/types";
+import { Survivor, SurvivorStatus, Team } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CharacterIcon } from "./CharacterIcon";
 import {
   Heart,
@@ -19,13 +29,12 @@ import {
   Wrench,
   Bed,
   UserPlus,
-  Users,
   Trash2,
-  ArrowRight,
   X,
   Wand2,
   AlertCircle,
   MapPin,
+  ArrowRight,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -48,40 +57,77 @@ export function SurvivorsView() {
   const [selectedSurvivorId, setSelectedSurvivorId] = useState<string | null>(
     null
   );
-  const [assignTargetTeamId, setAssignTargetTeamId] = useState<string | null>(
-    null
-  );
+  const [deleteTeamId, setDeleteTeamId] = useState<string | null>(null);
 
   if (!area) return null;
 
   const buildings = area.buildings;
-  const teams = area.teams;
+  const teams: Team[] = area.teams;
   const survivors: Survivor[] = area.survivorIds
     .map((id) => allSurvivors[id])
     .filter(Boolean);
 
   const capacity = selectSurvivorCapacity(area);
   const maxTeamSize = getMaxTeamSize(buildings.barracks.level);
-  // Match store logic: allow up to survivor count, min 3.
   const maxTeams = Math.max(3, survivors.length);
 
-  const selectedSurvivor = survivors.find((s) => s.id === selectedSurvivorId);
-  const idleSurvivors = survivors.filter(
+  // --- Sort survivors: unassigned first, then grouped by team ---
+  const unassigned = survivors.filter(
     (s) => s.role === "idle" || s.role === "resting"
   );
-  const teamSurvivors = survivors.filter((s) => s.role === "working");
+  const teamGroups = teams.map((team) => ({
+    team,
+    members: team.memberIds
+      .map((id) => allSurvivors[id])
+      .filter((s): s is Survivor => Boolean(s)),
+  }));
 
-  const handleCreateTeam = () => {
-    const name = String.fromCharCode(65 + teams.length); // A, B, C...
-    createTeam(`Team ${name}`);
+  // First team that has space (for the "assign to group A" quick button)
+  const firstTeamWithSpace = teams.find((t) => t.memberIds.length < maxTeamSize);
+
+  const selectedSurvivor = survivors.find((s) => s.id === selectedSurvivorId);
+
+  // Team being deleted (for confirm dialog)
+  const teamToDelete = deleteTeamId
+    ? teams.find((t) => t.id === deleteTeamId)
+    : null;
+  const teamHasMission = teamToDelete
+    ? area.missions.some(
+        (m) => m.teamId === teamToDelete.id && m.status === "pending"
+      )
+    : false;
+
+  const handleQuickAssign = (survivorId: string) => {
+    let target = firstTeamWithSpace;
+    if (!target) {
+      // No team with space — create a new one
+      if (teams.length >= maxTeams) return;
+      const name = `Team ${String.fromCharCode(65 + teams.length)}`;
+      const newId = createTeam(name);
+      if (!newId) return;
+      target = useGameStore.getState().areas[area.id].teams.find(
+        (t) => t.id === newId
+      );
+    }
+    if (target) {
+      assignSurvivorToTeam(survivorId, target.id);
+    }
   };
 
-  // Auto-assign is now handled entirely by the store.
-  const handleAutoAssign = () => {
-    useGameStore.getState().autoAssignSurvivors();
+  const handleNewGroupAndAssign = (survivorId: string) => {
+    if (teams.length >= maxTeams) return;
+    const name = `Team ${String.fromCharCode(65 + teams.length)}`;
+    const newId = createTeam(name);
+    if (!newId) return;
+    assignSurvivorToTeam(survivorId, newId);
   };
 
-  const hasAvailableSurvivors = idleSurvivors.length > 0;
+  const handleConfirmDelete = () => {
+    if (deleteTeamId) {
+      deleteTeam(deleteTeamId);
+      setDeleteTeamId(null);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -107,27 +153,28 @@ export function SurvivorsView() {
             </span>{" "}
             / {capacity} survivors
           </div>
-          <Badge
-            variant="outline"
-            className="border-stone-700 text-stone-400"
-          >
+          <Badge variant="outline" className="border-stone-700 text-stone-400">
             Max team size: {maxTeamSize}
           </Badge>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {unassigned.length > 0 && (
+            <Button
+              size="sm"
+              onClick={() => useGameStore.getState().autoAssignSurvivors()}
+              variant="outline"
+              className="border-emerald-800 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/50"
+            >
+              <Wand2 className="w-4 h-4 mr-1" />
+              Auto-Assign
+            </Button>
+          )}
           <Button
             size="sm"
-            onClick={handleAutoAssign}
-            disabled={!hasAvailableSurvivors}
-            variant="outline"
-            className="border-emerald-800 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/50"
-          >
-            <Wand2 className="w-4 h-4 mr-1" />
-            Auto-Assign
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleCreateTeam}
+            onClick={() => {
+              const name = `Team ${String.fromCharCode(65 + teams.length)}`;
+              createTeam(name);
+            }}
             disabled={teams.length >= maxTeams}
             className="bg-amber-700 hover:bg-amber-600 text-amber-50"
           >
@@ -137,59 +184,22 @@ export function SurvivorsView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4">
-        {/* LEFT: Idle survivors + Teams */}
-        <div className="space-y-3">
-          {/* Idle survivors */}
-          <Card className="bg-stone-900/60 border-stone-800 p-3">
-            <div className="flex items-center gap-1.5 mb-2">
-              <Users className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-sm font-semibold text-stone-200">
-                Available Survivors
-              </h3>
-              <Badge
-                variant="outline"
-                className="ml-auto text-[10px] border-stone-700 text-stone-400"
-              >
-                {idleSurvivors.length}
-              </Badge>
-            </div>
-            {idleSurvivors.length === 0 ? (
-              <div className="text-xs text-stone-500 italic py-3 text-center">
-                No available survivors. Everyone is on a team or you have none.
-              </div>
-            ) : (
-              <div className="space-y-1.5 max-h-[40vh] overflow-y-auto pr-1">
-                {idleSurvivors.map((s) => (
-                  <SurvivorRow
-                    key={s.id}
-                    survivor={s}
-                    selected={selectedSurvivorId === s.id}
-                    onClick={() =>
-                      setSelectedSurvivorId(
-                        selectedSurvivorId === s.id ? null : s.id
-                      )
-                    }
-                    onRest={() => setSurvivorResting(s.id, s.role !== "resting")}
-                  />
-                ))}
-              </div>
-            )}
-          </Card>
-
-          {/* Team survivors */}
-          {teamSurvivors.length > 0 && (
-            <Card className="bg-stone-900/60 border-stone-800 p-3">
-              <div className="flex items-center gap-1.5 mb-2">
-                <Swords className="w-4 h-4 text-amber-400" />
-                <h3 className="text-sm font-semibold text-stone-200">
-                  On Teams
-                </h3>
-              </div>
-              <div className="space-y-1.5 max-h-[30vh] overflow-y-auto pr-1">
-                {teamSurvivors.map((s) => {
-                  const team = teams.find((t) => t.id === s.assignedTeamId);
-                  return (
+      {/* Single list: unassigned first, then team groups */}
+      <Card className="bg-stone-900/60 border-stone-800 p-3">
+        {survivors.length === 0 ? (
+          <div className="text-xs text-stone-500 italic py-3 text-center">
+            No survivors in this area.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {/* Unassigned survivors */}
+            {unassigned.length > 0 && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-stone-500 mb-1.5 flex items-center gap-1">
+                  Unassigned ({unassigned.length})
+                </div>
+                <div className="space-y-1.5">
+                  {unassigned.map((s) => (
                     <SurvivorRow
                       key={s.id}
                       survivor={s}
@@ -199,143 +209,124 @@ export function SurvivorsView() {
                           selectedSurvivorId === s.id ? null : s.id
                         )
                       }
-                      teamName={team?.name}
-                      onUnassign={() => unassignSurvivorFromTeam(s.id)}
+                      onRest={() =>
+                        setSurvivorResting(s.id, s.role !== "resting")
+                      }
+                      onQuickAssign={() => handleQuickAssign(s.id)}
+                      onNewGroup={() => handleNewGroupAndAssign(s.id)}
+                      canAssign={teams.length < maxTeams || Boolean(firstTeamWithSpace)}
                     />
-                  );
-                })}
-              </div>
-            </Card>
-          )}
-        </div>
-
-        {/* RIGHT: Teams + Selected survivor detail */}
-        <div className="space-y-3">
-          {/* Teams list */}
-          <Card className="bg-stone-900/60 border-stone-800 p-3">
-            <div className="flex items-center gap-1.5 mb-2">
-              <Swords className="w-4 h-4 text-amber-400" />
-              <h3 className="text-sm font-semibold text-stone-200">Teams</h3>
-              <Badge
-                variant="outline"
-                className="ml-auto text-[10px] border-stone-700 text-stone-400"
-              >
-                {teams.length}
-              </Badge>
-            </div>
-            {teams.length === 0 ? (
-              <div className="text-xs text-stone-500 italic py-3 text-center">
-                No teams yet. Create one above to send survivors on missions.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {teams.map((team) => {
-                  const teamMembers = survivors.filter((s) =>
-                    team.memberIds.includes(s.id)
-                  );
-                  return (
-                    <div
-                      key={team.id}
-                      className={`border rounded p-2 ${
-                        assignTargetTeamId === team.id
-                          ? "border-amber-600 bg-amber-950/30"
-                          : "border-stone-800 bg-stone-950/40"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="font-medium text-sm text-amber-200">
-                          {team.name}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-stone-500">
-                            {teamMembers.length}/{maxTeamSize}
-                          </span>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-5 w-5 text-stone-500 hover:text-red-400"
-                            onClick={() => deleteTeam(team.id)}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1 mb-1.5 min-h-[28px]">
-                        {teamMembers.length === 0 ? (
-                          <span className="text-[10px] text-stone-600 italic">
-                            Empty — assign survivors
-                          </span>
-                        ) : (
-                          teamMembers.map((s) => (
-                            <div
-                              key={s.id}
-                              className="flex items-center gap-1 bg-stone-900 rounded px-1 py-0.5"
-                            >
-                              <CharacterIcon seed={s.iconSeed} size={20} />
-                              <span className="text-[10px] text-stone-300">
-                                {s.name}
-                              </span>
-                              <button
-                                onClick={() =>
-                                  unassignSurvivorFromTeam(s.id)
-                                }
-                                className="text-stone-500 hover:text-red-400 ml-0.5"
-                              >
-                                <X className="w-2.5 h-2.5" />
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                      {teamMembers.length < maxTeamSize && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full h-6 text-[10px] border-stone-700 text-stone-400 hover:bg-stone-800"
-                          onClick={() =>
-                            setAssignTargetTeamId(
-                              assignTargetTeamId === team.id ? null : team.id
-                            )
-                          }
-                        >
-                          {assignTargetTeamId === team.id
-                            ? "Click an available survivor →"
-                            : "+ Assign survivor"}
-                        </Button>
-                      )}
-                    </div>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
             )}
-          </Card>
 
-          {/* Selected survivor detail */}
-          {selectedSurvivor ? (
-            <SurvivorDetailCard
-              survivor={selectedSurvivor}
-              teams={teams}
-              assignTargetTeamId={assignTargetTeamId}
-              onAssign={(teamId) => {
-                assignSurvivorToTeam(selectedSurvivor.id, teamId);
-                setAssignTargetTeamId(null);
-              }}
-              onRest={() =>
-                setSurvivorResting(
-                  selectedSurvivor.id,
-                  selectedSurvivor.role !== "resting"
-                )
-              }
-              onClose={() => setSelectedSurvivorId(null)}
-            />
-          ) : assignTargetTeamId ? (
-            <Card className="bg-amber-950/20 border-amber-900/50 p-3 text-xs text-amber-300 flex items-center gap-2">
-              <ArrowRight className="w-4 h-4" />
-              Click an available survivor to assign them to this team.
-            </Card>
-          ) : null}
-        </div>
-      </div>
+            {/* Team groups */}
+            {teamGroups.map(({ team, members }) => {
+              const teamMission = area.missions.find(
+                (m) => m.teamId === team.id && m.status === "pending"
+              );
+              return (
+                <div key={team.id}>
+                  <div className="text-[10px] uppercase tracking-wide text-amber-500 mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Swords className="w-3 h-3" />
+                      {team.name} ({members.length}/{maxTeamSize})
+                      {teamMission && (
+                        <Badge
+                          variant="outline"
+                          className="ml-1 text-[9px] border-amber-700 text-amber-300 bg-amber-950/40"
+                        >
+                          {teamMission.missionType === "salvage"
+                            ? "⛏ Salvaging"
+                            : "→ Scouting"}
+                        </Badge>
+                      )}
+                    </span>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-5 w-5 text-stone-500 hover:text-red-400"
+                      onClick={() => setDeleteTeamId(team.id)}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {members.length === 0 ? (
+                      <div className="text-[10px] text-stone-600 italic py-1">
+                        Empty — assign a survivor
+                      </div>
+                    ) : (
+                      members.map((s) => (
+                        <SurvivorRow
+                          key={s.id}
+                          survivor={s}
+                          selected={selectedSurvivorId === s.id}
+                          onClick={() =>
+                            setSelectedSurvivorId(
+                              selectedSurvivorId === s.id ? null : s.id
+                            )
+                          }
+                          onRest={() =>
+                            setSurvivorResting(s.id, s.role !== "resting")
+                          }
+                          onUnassign={() => unassignSurvivorFromTeam(s.id)}
+                          teamName={team.name}
+                        />
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* Selected survivor detail */}
+      {selectedSurvivor && (
+        <SurvivorDetailCard
+          survivor={selectedSurvivor}
+          onClose={() => setSelectedSurvivorId(null)}
+        />
+      )}
+
+      {/* Delete team confirmation */}
+      <AlertDialog
+        open={deleteTeamId !== null}
+        onOpenChange={(open) => !open && setDeleteTeamId(null)}
+      >
+        <AlertDialogContent className="bg-stone-950 border-stone-800 text-stone-100">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-amber-200">
+              Delete {teamToDelete?.name}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-stone-400">
+              {teamHasMission ? (
+                <span className="text-amber-300">
+                  This team is currently on a mission. Deleting the team will
+                  also cancel the mission and the survivors will return to idle.
+                  Are you sure?
+                </span>
+              ) : (
+                "The team will be disbanded and all members will return to unassigned."
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-stone-700 text-stone-300 hover:bg-stone-800">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-red-700 hover:bg-red-600 text-red-50"
+            >
+              Delete Team
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -355,17 +346,24 @@ function SurvivorRow({
   selected,
   onClick,
   onRest,
-  teamName,
   onUnassign,
+  onQuickAssign,
+  onNewGroup,
+  canAssign,
+  teamName,
 }: {
   survivor: Survivor;
   selected: boolean;
   onClick: () => void;
   onRest?: () => void;
-  teamName?: string;
   onUnassign?: () => void;
+  onQuickAssign?: () => void;
+  onNewGroup?: () => void;
+  canAssign?: boolean;
+  teamName?: string;
 }) {
   const status = STATUS_LABELS[survivor.status];
+  const isResting = survivor.role === "resting";
   return (
     <div
       className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${
@@ -382,6 +380,9 @@ function SurvivorRow({
             {survivor.name}
           </span>
           <span className={`text-[10px] ${status.color}`}>{status.label}</span>
+          {isResting && (
+            <span className="text-[10px] text-emerald-400">Resting</span>
+          )}
         </div>
         <div className="flex items-center gap-1 mt-0.5">
           <Progress
@@ -394,44 +395,66 @@ function SurvivorRow({
                 : "[&>div]:bg-emerald-500"
             }`}
           />
-          <span className="text-[10px] text-stone-400">
-            {survivor.health}
-          </span>
+          <span className="text-[10px] text-stone-400">{survivor.health}</span>
         </div>
-        {teamName && (
-          <div className="text-[10px] text-amber-400 mt-0.5">{teamName}</div>
+      </div>
+      {/* Action buttons */}
+      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        {onUnassign ? (
+          // In a team — show remove button
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-[10px] text-stone-500 hover:text-red-400"
+            onClick={onUnassign}
+          >
+            <X className="w-3 h-3 mr-0.5" />
+            Remove
+          </Button>
+        ) : (
+          // Unassigned — show quick assign + new group buttons
+          <>
+            {onQuickAssign && canAssign && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-[10px] border-amber-700 bg-amber-950/30 text-amber-200 hover:bg-amber-900/50"
+                onClick={onQuickAssign}
+              >
+                <ArrowRight className="w-3 h-3 mr-0.5" />
+                Assign
+              </Button>
+            )}
+            {onNewGroup && canAssign && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-[10px] border-stone-700 text-stone-300 hover:bg-stone-800"
+                onClick={onNewGroup}
+              >
+                <UserPlus className="w-3 h-3 mr-0.5" />
+                New
+              </Button>
+            )}
+          </>
+        )}
+        {/* Rest button (always available unless on mission) */}
+        {onRest && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className={`h-6 text-[10px] ${
+              isResting
+                ? "text-emerald-400"
+                : "text-stone-500 hover:text-stone-300"
+            }`}
+            onClick={onRest}
+          >
+            <Bed className="w-3 h-3 mr-0.5" />
+            {isResting ? "Stop" : "Rest"}
+          </Button>
         )}
       </div>
-      {teamName && onUnassign ? (
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-6 w-6 text-stone-500 hover:text-red-400"
-          onClick={(e) => {
-            e.stopPropagation();
-            onUnassign();
-          }}
-        >
-          <X className="w-3 h-3" />
-        </Button>
-      ) : onRest ? (
-        <Button
-          size="sm"
-          variant="ghost"
-          className={`h-6 text-[10px] ${
-            survivor.role === "resting"
-              ? "text-emerald-400"
-              : "text-stone-500 hover:text-stone-300"
-          }`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRest();
-          }}
-        >
-          <Bed className="w-3 h-3 mr-0.5" />
-          {survivor.role === "resting" ? "Resting" : "Rest"}
-        </Button>
-      ) : null}
     </div>
   );
 }
@@ -439,24 +462,16 @@ function SurvivorRow({
 // ---------- Survivor Detail Card ----------
 function SurvivorDetailCard({
   survivor,
-  teams,
-  assignTargetTeamId,
-  onAssign,
-  onRest,
   onClose,
 }: {
   survivor: Survivor;
-  teams: { id: string; name: string; memberIds: string[] }[];
-  assignTargetTeamId: string | null;
-  onAssign: (teamId: string) => void;
-  onRest: () => void;
   onClose: () => void;
 }) {
   const stats = [
-    { icon: <Heart className="w-3 h-3 text-rose-400" />, label: "Health", value: survivor.health, color: "rose" },
-    { icon: <Beef className="w-3 h-3 text-amber-400" />, label: "Hunger", value: 100 - survivor.hunger, color: "amber" },
-    { icon: <Droplet className="w-3 h-3 text-sky-400" />, label: "Thirst", value: 100 - survivor.thirst, color: "sky" },
-    { icon: <Smile className="w-3 h-3 text-emerald-400" />, label: "Morale", value: survivor.morale, color: "emerald" },
+    { icon: <Heart className="w-3 h-3 text-rose-400" />, label: "Health", value: survivor.health },
+    { icon: <Beef className="w-3 h-3 text-amber-400" />, label: "Hunger", value: 100 - survivor.hunger },
+    { icon: <Droplet className="w-3 h-3 text-sky-400" />, label: "Thirst", value: 100 - survivor.thirst },
+    { icon: <Smile className="w-3 h-3 text-emerald-400" />, label: "Morale", value: survivor.morale },
   ];
 
   const skills = [
@@ -487,23 +502,13 @@ function SurvivorDetailCard({
               : "Idle — ready for orders"}
           </div>
         </div>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-6 w-6 text-stone-500"
-          onClick={onClose}
-        >
+        <Button size="icon" variant="ghost" className="h-6 w-6 text-stone-500" onClick={onClose}>
           <X className="w-4 h-4" />
         </Button>
       </div>
-
-      {/* Stats */}
       <div className="grid grid-cols-2 gap-2 mb-3">
         {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className="bg-stone-950/50 border border-stone-800 rounded p-1.5"
-          >
+          <div key={stat.label} className="bg-stone-950/50 border border-stone-800 rounded p-1.5">
             <div className="flex items-center gap-1 text-[10px] text-stone-400 mb-0.5">
               {stat.icon}
               {stat.label}
@@ -524,63 +529,20 @@ function SurvivorDetailCard({
           </div>
         ))}
       </div>
-
-      {/* Skills */}
-      <div className="bg-stone-950/50 border border-stone-800 rounded p-2 mb-3">
+      <div className="bg-stone-950/50 border border-stone-800 rounded p-2">
         <div className="text-[10px] uppercase tracking-wide text-stone-500 mb-1.5">
           Skills
         </div>
         <div className="grid grid-cols-2 gap-1.5">
           {skills.map((skill) => (
-            <div
-              key={skill.label}
-              className="flex items-center gap-1.5 text-xs text-stone-300"
-            >
+            <div key={skill.label} className="flex items-center gap-1.5 text-xs text-stone-300">
               <span className="text-amber-400">{skill.icon}</span>
               <span>{skill.label}</span>
-              <span className="ml-auto text-stone-100 font-bold">
-                {skill.value}
-              </span>
+              <span className="ml-auto text-stone-100 font-bold">{skill.value}</span>
             </div>
           ))}
         </div>
       </div>
-
-      {/* Actions */}
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          className={`flex-1 ${
-            survivor.role === "resting"
-              ? "border-emerald-700 bg-emerald-950/30 text-emerald-300"
-              : "border-stone-700 text-stone-300 hover:bg-stone-800"
-          }`}
-          onClick={onRest}
-          disabled={survivor.role === "working"}
-        >
-          <Bed className="w-3 h-3 mr-1" />
-          {survivor.role === "resting" ? "Stop Resting" : "Rest"}
-        </Button>
-      </div>
-
-      {/* Assign to team */}
-      {assignTargetTeamId && survivor.role === "idle" && (
-        <Button
-          size="sm"
-          className="w-full mt-2 bg-amber-700 hover:bg-amber-600 text-amber-50"
-          onClick={() => onAssign(assignTargetTeamId)}
-        >
-          <ArrowRight className="w-3 h-3 mr-1" />
-          Assign to selected team
-        </Button>
-      )}
-
-      {survivor.health < 30 && (
-        <div className="mt-2 text-[10px] text-red-400 bg-red-950/30 border border-red-900/50 rounded p-1.5">
-          Health too low — cannot join teams until treated at the infirmary.
-        </div>
-      )}
     </Card>
   );
 }

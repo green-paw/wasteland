@@ -986,16 +986,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!area) return;
     const team = area.teams.find((t) => t.id === teamId);
     if (!team) return;
+    // Reset all team members to idle (immutable)
+    const survivors = { ...state.survivors };
     team.memberIds.forEach((id) => {
-      const s = state.survivors[id];
+      const s = survivors[id];
       if (s) {
-        s.assignedTeamId = undefined;
-        s.role = "idle";
+        survivors[id] = { ...s, assignedTeamId: undefined, role: "idle" as const };
       }
     });
-    const survivors = { ...state.survivors };
     const areas = updateArea(state, state.currentAreaId, (a) => {
+      // Remove the team
       a.teams = a.teams.filter((t) => t.id !== teamId);
+      // Also remove any pending missions for this team (salvage/scout),
+      // otherwise the mission would be orphaned and re-dispatched each day.
+      a.missions = a.missions.filter(
+        (m) => !(m.teamId === teamId && m.status === "pending")
+      );
     });
     set({ areas, survivors });
   },
