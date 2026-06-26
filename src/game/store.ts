@@ -787,13 +787,37 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
     });
 
+    // Find teams that lose members — if a team loses any member, cancel its
+    // pending missions (the team composition changed, can't continue salvage/scout).
+    const affectedTeamIds = new Set<string>();
+    for (const t of fromArea.teams) {
+      if (t.memberIds.some((id) => validSurvivors.includes(id))) {
+        affectedTeamIds.add(t.id);
+      }
+    }
+
     // Update the source area immutably
     const areas = updateArea(state, state.currentAreaId, (a) => {
       a.survivorIds = a.survivorIds.filter((id) => !validSurvivors.includes(id));
       a.teams = a.teams.map((t) => ({
         ...t,
         memberIds: t.memberIds.filter((id) => !validSurvivors.includes(id)),
+        // Clear locationId for teams that lost members (they're no longer deployed)
+        locationId:
+          affectedTeamIds.has(t.id) && t.memberIds.length === 0
+            ? null
+            : t.locationId,
       }));
+      // Cancel pending missions for affected teams
+      if (affectedTeamIds.size > 0) {
+        a.missions = a.missions.filter(
+          (m) =>
+            !(
+              affectedTeamIds.has(m.teamId) &&
+              m.status === "pending"
+            )
+        );
+      }
     });
 
     // Create transfer

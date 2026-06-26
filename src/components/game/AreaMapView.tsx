@@ -1334,6 +1334,11 @@ export function AreaMapView() {
                 </div>
                 <div className="text-sm text-emerald-300">
                   {Math.round(selectedLocation.survivorChance * 100)}%
+                  {selectedLocation.survivorChance >= 1.0 && (
+                    <span className="ml-1.5 text-[10px] text-amber-400 font-semibold">
+                      (guaranteed)
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

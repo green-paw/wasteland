@@ -116,7 +116,9 @@ export function generateAreaLocations(
       loot,
       salvagePool,
       salvageDepleted: false,
-      survivorChance: locDef.survivorChance,
+      // Starting area: guaranteed survivor recruit from this easy location,
+      // so the player can grow their group on day 1.
+      survivorChance: isStart ? 1.0 : locDef.survivorChance,
       explored: false,
       cleared: false,
       distance: 0.5,
