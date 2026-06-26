@@ -81,26 +81,22 @@ export function SurvivorsView() {
     useGameStore.getState().autoAssignSurvivors();
   };
 
-  // No base in this area — teams can't be managed here.
-  if (!area.hasBase) {
-    return (
-      <div className="space-y-4">
-        <AreaHeader name={area.name} />
-        <Card className="bg-stone-900/60 border-stone-800 p-6 flex flex-col items-center text-center">
-          <AlertCircle className="w-8 h-8 text-amber-400 mb-2" />
-          <p className="text-sm text-stone-300 max-w-md">
-            No base in this area. Establish a base first to manage teams.
-          </p>
-        </Card>
-      </div>
-    );
-  }
-
   const hasAvailableSurvivors = idleSurvivors.length > 0;
 
   return (
     <div className="space-y-4">
       <AreaHeader name={area.name} />
+
+      {!area.hasBase && (
+        <Card className="bg-amber-950/30 border-amber-900/50 p-3 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-amber-200">
+            No base established in this area. You can still form teams and scout
+            locations — clear one and claim it as your base to unlock building
+            and production.
+          </p>
+        </Card>
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between gap-2 flex-wrap">

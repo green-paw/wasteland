@@ -115,6 +115,31 @@ function calculateCaps(area: Area): Resources {
   return base;
 }
 
+// ---------- Helper: produce a new areas dict with one area replaced by a fresh clone ----------
+// Zustand uses reference equality on the selector result, so mutating an area
+// in place is NOT enough to trigger re-renders. Always use this helper to
+// publish area changes.
+function updateArea(
+  state: GameState,
+  areaId: string,
+  mutate: (area: Area) => void
+): Record<string, Area> {
+  const oldArea = state.areas[areaId];
+  if (!oldArea) return state.areas;
+  const newArea: Area = {
+    ...oldArea,
+    buildings: { ...oldArea.buildings },
+    resources: { ...oldArea.resources },
+    resourceCaps: { ...oldArea.resourceCaps },
+    teams: [...oldArea.teams],
+    missions: [...oldArea.missions],
+    locations: [...oldArea.locations],
+    survivorIds: [...oldArea.survivorIds],
+  };
+  mutate(newArea);
+  return { ...state.areas, [areaId]: newArea };
+}
+
 // ---------- Initial State ----------
 function createInitialState(): GameState {
   const starter = generateSurvivor(1);
@@ -753,22 +778,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const validSurvivors = survivorIds.filter((id) => fromArea.survivorIds.includes(id));
     if (validSurvivors.length === 0) return;
 
-    // Remove survivors from source area
-    fromArea.survivorIds = fromArea.survivorIds.filter((id) => !validSurvivors.includes(id));
-
-    // Remove from any teams in source area
-    fromArea.teams = fromArea.teams.map((t) => ({
-      ...t,
-      memberIds: t.memberIds.filter((id) => !validSurvivors.includes(id)),
-    }));
-
-    // Set survivors to in-transit
+    // Set survivors to in-transit (immutable)
+    const survivors = { ...state.survivors };
     validSurvivors.forEach((id) => {
-      const s = state.survivors[id];
+      const s = survivors[id];
       if (s) {
-        s.role = "idle";
-        s.assignedTeamId = undefined;
+        survivors[id] = { ...s, role: "idle", assignedTeamId: undefined };
       }
+    });
+
+    // Update the source area immutably
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.survivorIds = a.survivorIds.filter((id) => !validSurvivors.includes(id));
+      a.teams = a.teams.map((t) => ({
+        ...t,
+        memberIds: t.memberIds.filter((id) => !validSurvivors.includes(id)),
+      }));
     });
 
     // Create transfer
@@ -782,7 +807,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     };
 
     set({
-      areas: { ...state.areas },
+      areas,
+      survivors,
       transfers: [...state.transfers, transfer],
       log: [
         ...state.log,
@@ -802,14 +828,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const loc = area.locations.find((l) => l.id === locationId);
     if (!loc || !loc.cleared) return;
 
-    area.hasBase = true;
-    area.baseLocationId = locationId;
-    area.buildings = initialBuildings();
-    area.resourceCaps = calculateCaps(area);
-    area.resources = clampResources(area.resources, area.resourceCaps);
+    const newBuildings = initialBuildings();
+    const areas = updateArea(state, areaId, (a) => {
+      a.hasBase = true;
+      a.baseLocationId = locationId;
+      a.buildings = newBuildings;
+      a.resourceCaps = calculateCaps({ ...a, buildings: newBuildings });
+      a.resources = clampResources(a.resources, a.resourceCaps);
+    });
 
     set({
-      areas: { ...state.areas },
+      areas,
       log: [
         ...state.log,
         {
@@ -832,17 +861,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const isNeighbor = neighbors.some(([q, r]) => q === toArea.hex[0] && r === toArea.hex[1]);
     if (!isNeighbor) return;
 
-    // Validate resources
+    // Validate resources and compute the deduction
     const validResources: Partial<Resources> = {};
+    const newFromResources = { ...fromArea.resources };
     for (const [k, v] of Object.entries(resources)) {
       const amount = Math.min(fromArea.resources[k as ResourceType], v as number);
       if (amount > 0) {
         validResources[k as ResourceType] = amount;
-        fromArea.resources[k as ResourceType] -= amount;
+        newFromResources[k as ResourceType] -= amount;
       }
     }
 
     if (Object.keys(validResources).length === 0) return;
+
+    const areas = updateArea(state, fromAreaId, (a) => {
+      a.resources = newFromResources;
+    });
 
     const transfer: Transfer = {
       id: `transfer_res_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
@@ -854,7 +888,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     };
 
     set({
-      areas: { ...state.areas },
+      areas,
       transfers: [...state.transfers, transfer],
       log: [
         ...state.log,
@@ -876,19 +910,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const cost = getUpgradeCost(type, building.level, area.buildings.workshop.level);
     if (!canAfford(area.resources, cost)) return;
     const newResources = subtractCost(area.resources, cost);
-    area.buildings = {
-      ...area.buildings,
-      [type]: {
-        ...building,
-        level: building.level + 1,
-        maxHp: BUILDING_DEFS[type].baseHp + building.level * 20,
-        hp: building.hp + 20,
-      },
+    const newBuilding = {
+      ...building,
+      level: building.level + 1,
+      maxHp: BUILDING_DEFS[type].baseHp + building.level * 20,
+      hp: building.hp + 20,
     };
-    area.resources = clampResources(newResources, calculateCaps(area));
-    area.resourceCaps = calculateCaps(area);
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.buildings = { ...a.buildings, [type]: newBuilding };
+      a.resourceCaps = calculateCaps({ ...a, buildings: a.buildings });
+      a.resources = clampResources(newResources, a.resourceCaps);
+    });
     set({
-      areas: { ...state.areas },
+      areas,
       log: [
         ...state.log,
         {
@@ -908,13 +942,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (building.hp >= building.maxHp) return;
     const repairCost = { materials: Math.ceil((building.maxHp - building.hp) / 5) };
     if (!canAfford(area.resources, repairCost)) return;
-    area.resources = subtractCost(area.resources, repairCost);
-    area.buildings = {
-      ...area.buildings,
-      [type]: { ...building, hp: building.maxHp },
-    };
+    const newResources = subtractCost(area.resources, repairCost);
+    const newBuilding = { ...building, hp: building.maxHp };
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.buildings = { ...a.buildings, [type]: newBuilding };
+      a.resources = newResources;
+    });
     set({
-      areas: { ...state.areas },
+      areas,
       log: [
         ...state.log,
         {
@@ -929,7 +964,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   createTeam: (name) => {
     const state = get();
     const area = state.areas[state.currentAreaId];
-    if (!area || !area.hasBase) return null;
+    if (!area) return null;
     const maxTeams = Math.max(3, area.survivorIds.length);
     if (area.teams.length >= maxTeams) return null;
     const team: Team = {
@@ -938,8 +973,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       memberIds: [],
       locationId: null,
     };
-    area.teams = [...area.teams, team];
-    set({ areas: { ...state.areas } });
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.teams = [...a.teams, team];
+    });
+    set({ areas });
     return team.id;
   },
 
@@ -956,8 +993,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
         s.role = "idle";
       }
     });
-    area.teams = area.teams.filter((t) => t.id !== teamId);
-    set({ areas: { ...state.areas } });
+    const survivors = { ...state.survivors };
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.teams = a.teams.filter((t) => t.id !== teamId);
+    });
+    set({ areas, survivors });
   },
 
   assignSurvivorToTeam: (survivorId, teamId) => {
@@ -973,31 +1013,44 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const maxSize = getMaxTeamSize(area.buildings.barracks.level);
     if (team.memberIds.length >= maxSize) return;
 
-    area.teams = area.teams.map((t) => ({
-      ...t,
-      memberIds: t.memberIds.filter((id) => id !== survivorId),
-    }));
-    const targetTeam = area.teams.find((t) => t.id === teamId);
-    if (targetTeam) targetTeam.memberIds.push(survivorId);
-    survivor.assignedTeamId = teamId;
-    survivor.role = "working";
-    set({ areas: { ...state.areas } });
+    const survivors = { ...state.survivors };
+    survivors[survivorId] = {
+      ...survivor,
+      assignedTeamId: teamId,
+      role: "working",
+    };
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.teams = a.teams.map((t) => ({
+        ...t,
+        memberIds: [
+          ...t.memberIds.filter((id) => id !== survivorId),
+          ...(t.id === teamId ? [survivorId] : []),
+        ],
+      }));
+    });
+    set({ areas, survivors });
   },
 
   unassignSurvivorFromTeam: (survivorId) => {
     const state = get();
     const area = state.areas[state.currentAreaId];
     if (!area) return;
-    area.teams = area.teams.map((t) => ({
-      ...t,
-      memberIds: t.memberIds.filter((id) => id !== survivorId),
-    }));
     const survivor = state.survivors[survivorId];
+    const survivors = { ...state.survivors };
     if (survivor) {
-      survivor.assignedTeamId = undefined;
-      survivor.role = "idle";
+      survivors[survivorId] = {
+        ...survivor,
+        assignedTeamId: undefined,
+        role: "idle",
+      };
     }
-    set({ areas: { ...state.areas } });
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.teams = a.teams.map((t) => ({
+        ...t,
+        memberIds: t.memberIds.filter((id) => id !== survivorId),
+      }));
+    });
+    set({ areas, survivors });
   },
 
   assignTeamToLocation: (teamId, locationId) => {
@@ -1023,12 +1076,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       status: "pending",
       missionType: "scout",
     };
-    area.teams = area.teams.map((t) =>
-      t.id === teamId ? { ...t, locationId } : t
-    );
-    area.missions = [...area.missions, mission];
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.teams = a.teams.map((t) =>
+        t.id === teamId ? { ...t, locationId } : t
+      );
+      a.missions = [...a.missions, mission];
+    });
     set({
-      areas: { ...state.areas },
+      areas,
       log: [
         ...state.log,
         {
@@ -1062,12 +1117,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       status: "pending",
       missionType: "salvage",
     };
-    area.teams = area.teams.map((t) =>
-      t.id === teamId ? { ...t, locationId } : t
-    );
-    area.missions = [...area.missions, mission];
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.teams = a.teams.map((t) =>
+        t.id === teamId ? { ...t, locationId } : t
+      );
+      a.missions = [...a.missions, mission];
+    });
     set({
-      areas: { ...state.areas },
+      areas,
       log: [
         ...state.log,
         {
@@ -1085,13 +1142,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!area) return;
     const team = area.teams.find((t) => t.id === teamId);
     if (!team || !team.locationId) return;
-    area.missions = area.missions.filter(
-      (m) => !(m.teamId === teamId && m.status === "pending")
-    );
-    area.teams = area.teams.map((t) =>
-      t.id === teamId ? { ...t, locationId: null } : t
-    );
-    set({ areas: { ...state.areas } });
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.missions = a.missions.filter(
+        (m) => !(m.teamId === teamId && m.status === "pending")
+      );
+      a.teams = a.teams.map((t) =>
+        t.id === teamId ? { ...t, locationId: null } : t
+      );
+    });
+    set({ areas });
   },
 
   setSurvivorResting: (survivorId, resting) => {
@@ -1100,19 +1159,25 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!area) return;
     const survivor = state.survivors[survivorId];
     if (!survivor) return;
-    survivor.role = resting ? "resting" : "idle";
-    survivor.assignedTeamId = undefined;
-    area.teams = area.teams.map((t) => ({
-      ...t,
-      memberIds: t.memberIds.filter((id) => id !== survivorId),
-    }));
-    set({ areas: { ...state.areas } });
+    const survivors = { ...state.survivors };
+    survivors[survivorId] = {
+      ...survivor,
+      role: resting ? "resting" : "idle",
+      assignedTeamId: undefined,
+    };
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      a.teams = a.teams.map((t) => ({
+        ...t,
+        memberIds: t.memberIds.filter((id) => id !== survivorId),
+      }));
+    });
+    set({ areas, survivors });
   },
 
   autoAssignSurvivors: () => {
     const state = get();
     const area = state.areas[state.currentAreaId];
-    if (!area || !area.hasBase) return;
+    if (!area) return;
     const available = area.survivorIds
       .map((id) => state.survivors[id])
       .filter((s) => s && (s.role === "idle" || s.role === "resting"));
@@ -1179,10 +1244,26 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       newLog.push({ day: nextDay, message: `=== Day ${nextDay} ===`, type: "info" });
 
+      // Shallow-clone every area so reference equality changes for the
+      // Zustand selectors that depend on `s.areas[id]`.
+      const newAreas: Record<string, Area> = {};
+      for (const [id, area] of Object.entries(state.areas)) {
+        newAreas[id] = {
+          ...area,
+          buildings: { ...area.buildings },
+          resources: { ...area.resources },
+          resourceCaps: { ...area.resourceCaps },
+          teams: [...area.teams],
+          missions: [...area.missions],
+          locations: area.locations.map((l) => ({ ...l })),
+          survivorIds: [...area.survivorIds],
+        };
+      }
+
       return {
         ...state,
         day: nextDay,
-        areas: { ...state.areas },
+        areas: newAreas,
         survivors: allSurvivors,
         transfers: remainingTransfers,
         log: newLog.slice(-120),
