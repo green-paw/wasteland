@@ -13,7 +13,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useState } from "react";
 import { Moon, AlertCircle } from "lucide-react";
-import { GameLogEntry } from "@/game/types";
+import { GameLogEntry, Mission, Team, GameLocation } from "@/game/types";
 
 export function EndDayDialog({
   open,
@@ -23,10 +23,10 @@ export function EndDayDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const endDay = useGameStore((s) => s.endDay);
-  const missions = useGameStore((s) => s.missions);
-  const teams = useGameStore((s) => s.teams);
-  const locations = useGameStore((s) => s.locations);
-  const survivors = useGameStore((s) => s.survivors);
+  const areas = useGameStore((s) => s.areas);
+  const allSurvivors = useGameStore((s) => s.survivors);
+  const transfers = useGameStore((s) => s.transfers);
+  const day = useGameStore((s) => s.day);
   const gameOver = useGameStore((s) => s.gameOver);
   const gameOverReason = useGameStore((s) => s.gameOverReason);
   const resetGame = useGameStore((s) => s.resetGame);
@@ -35,16 +35,25 @@ export function EndDayDialog({
   const [lastDayLog, setLastDayLog] = useState<GameLogEntry[]>([]);
   const [endingDay, setEndingDay] = useState<number | null>(null);
 
-  const pendingMissions = missions.filter((m) => m.status === "pending");
+  // Gather all pending missions across all areas
+  const allPendingMissions: { mission: Mission; team?: Team; loc?: GameLocation; areaName: string }[] = [];
+  for (const area of Object.values(areas)) {
+    for (const m of area.missions) {
+      if (m.status !== "pending") continue;
+      const team = area.teams.find((t) => t.id === m.teamId);
+      const loc = area.locations.find((l) => l.id === m.locationId);
+      allPendingMissions.push({ mission: m, team, loc, areaName: area.name });
+    }
+  }
+
+  const pendingTransfers = transfers.filter((t) => t.arrivalDay > day);
 
   const handleEndDay = async () => {
     setResolving(true);
     const currentDay = useGameStore.getState().day;
     setEndingDay(currentDay);
-    // small delay for UX
     await new Promise((r) => setTimeout(r, 200));
     endDay();
-    // pull log entries from this day
     const allLog = useGameStore.getState().log;
     setLastDayLog(allLog.filter((e) => e.day === currentDay || e.day === currentDay + 1));
     setResolving(false);
@@ -63,8 +72,8 @@ export function EndDayDialog({
           <DialogTitle className="flex items-center gap-2 text-amber-200">
             <Moon className="w-5 h-5" />
             {lastDayLog.length > 0
-              ? `Day ${endingDay ?? useGameStore.getState().day - 1} Results`
-              : `End Day ${useGameStore.getState().day}?`}
+              ? `Day ${endingDay ?? day - 1} Results`
+              : `End Day ${day}?`}
           </DialogTitle>
           <DialogDescription className="text-stone-400">
             Review your plans, then let the night unfold.
@@ -130,20 +139,18 @@ export function EndDayDialog({
           <div className="space-y-3">
             <div className="bg-stone-900/50 border border-stone-800 rounded-md p-3">
               <div className="text-xs uppercase tracking-wide text-stone-500 mb-2">
-                Pending Missions
+                Pending Missions ({allPendingMissions.length})
               </div>
-              {pendingMissions.length === 0 ? (
+              {allPendingMissions.length === 0 ? (
                 <div className="text-sm text-stone-500 italic">
                   No teams dispatched. The day will pass quietly.
                 </div>
               ) : (
-                <div className="space-y-1.5">
-                  {pendingMissions.map((m) => {
-                    const team = teams.find((t) => t.id === m.teamId);
-                    const loc = locations.find((l) => l.id === m.locationId);
-                    const teamSurvivors = survivors.filter((s) =>
-                      m.team.includes(s.id)
-                    );
+                <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                  {allPendingMissions.map(({ mission: m, team, loc, areaName }) => {
+                    const teamSurvivors = m.team
+                      .map((id) => allSurvivors[id])
+                      .filter(Boolean);
                     const isSalvage = m.missionType === "salvage";
                     return (
                       <div
@@ -165,13 +172,15 @@ export function EndDayDialog({
                           {team?.name}
                         </span>
                         <span className="text-stone-500">
-                          ({teamSurvivors.length} survivor
-                          {teamSurvivors.length !== 1 ? "s" : ""})
+                          ({teamSurvivors.length})
                         </span>
                         <span className="text-stone-400">
                           {isSalvage ? "salvaging" : "scouting"}
                         </span>
                         <span className="text-emerald-300">{loc?.name}</span>
+                        <span className="text-stone-600 text-[10px] ml-auto">
+                          {areaName}
+                        </span>
                       </div>
                     );
                   })}
@@ -179,11 +188,41 @@ export function EndDayDialog({
               )}
             </div>
 
+            {pendingTransfers.length > 0 && (
+              <div className="bg-stone-900/50 border border-stone-800 rounded-md p-3">
+                <div className="text-xs uppercase tracking-wide text-stone-500 mb-2">
+                  In-Transit Transfers ({pendingTransfers.length})
+                </div>
+                <div className="space-y-1">
+                  {pendingTransfers.map((t) => {
+                    const fromArea = areas[t.fromAreaId];
+                    const toArea = areas[t.toAreaId];
+                    return (
+                      <div
+                        key={t.id}
+                        className="text-sm flex items-center gap-2 text-stone-300"
+                      >
+                        <span className="text-purple-300">⇄</span>
+                        <span>{t.survivorIds.length} surv</span>
+                        <span className="text-stone-500">
+                          {fromArea?.name} → {toArea?.name}
+                        </span>
+                        <span className="text-stone-600 text-[10px] ml-auto">
+                          arrives Day {t.arrivalDay}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="bg-stone-900/30 border border-stone-800 rounded-md p-3 text-xs text-stone-400 space-y-1">
-              <div>• Teams will travel and resolve their missions.</div>
+              <div>• All areas will be processed simultaneously.</div>
+              <div>• Teams will resolve their missions.</div>
+              <div>• In-transit transfers will arrive at their destinations.</div>
               <div>• Survivors will consume food and water.</div>
               <div>• Buildings will produce resources.</div>
-              <div>• Random events may occur during the night.</div>
             </div>
 
             <DialogFooter>

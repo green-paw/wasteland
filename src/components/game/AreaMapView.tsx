@@ -24,6 +24,7 @@ import {
   Trash2,
   Hammer,
   Pickaxe,
+  Home as HomeIcon,
 } from "lucide-react";
 
 // ---------- Helper: window ----------
@@ -866,9 +867,10 @@ function LocationMarker({
 
 // ---------- Mission Lines ----------
 function MissionLines() {
-  const missions = useGameStore((s) => s.missions);
-  const locations = useGameStore((s) => s.locations);
-  const teams = useGameStore((s) => s.teams);
+  const area = useGameStore((s) => s.areas[s.currentAreaId]);
+  const missions = area?.missions ?? [];
+  const locations = area?.locations ?? [];
+  const teams = area?.teams ?? [];
 
   const pendingMissions = missions.filter((m) => m.status === "pending");
 
@@ -914,8 +916,9 @@ function Scene({
   selectedLocationId: string | null;
   onSelectLocation: (id: string | null) => void;
 }) {
-  const locations = useGameStore((s) => s.locations);
-  const missions = useGameStore((s) => s.missions);
+  const area = useGameStore((s) => s.areas[s.currentAreaId]);
+  const locations = area?.locations ?? [];
+  const missions = area?.missions ?? [];
 
   return (
     <>
@@ -968,16 +971,22 @@ function Scene({
   );
 }
 
-// ---------- Main World Map View ----------
-export function WorldMapView() {
-  const locations = useGameStore((s) => s.locations);
-  const teams = useGameStore((s) => s.teams);
-  const survivors = useGameStore((s) => s.survivors);
-  const missions = useGameStore((s) => s.missions);
+// ---------- Main Area Map View ----------
+export function AreaMapView() {
+  const area = useGameStore((s) => s.areas[s.currentAreaId]);
+  const allSurvivors = useGameStore((s) => s.survivors);
   const assignTeamToLocation = useGameStore((s) => s.assignTeamToLocation);
   const assignTeamToSalvage = useGameStore((s) => s.assignTeamToSalvage);
   const clearTeamLocation = useGameStore((s) => s.clearTeamLocation);
   const createTeam = useGameStore((s) => s.createTeam);
+  const claimBase = useGameStore((s) => s.claimBase);
+
+  const locations = area?.locations ?? [];
+  const teams = area?.teams ?? [];
+  const missions = area?.missions ?? [];
+  const survivors = (area?.survivorIds ?? [])
+    .map((id) => allSurvivors[id])
+    .filter(Boolean);
 
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(
     null
@@ -995,7 +1004,6 @@ export function WorldMapView() {
     if (!selectedTeamId || !selectedLocationId) return;
     const team = teams.find((t) => t.id === selectedTeamId);
     if (!team || team.memberIds.length === 0) return;
-    // Don't allow if team already has a pending mission (defensive — UI also blocks this)
     const teamHasPending = missions.some(
       (m) => m.teamId === selectedTeamId && m.status === "pending"
     );
@@ -1005,12 +1013,17 @@ export function WorldMapView() {
     } else {
       assignTeamToLocation(selectedTeamId, selectedLocationId);
     }
-    // Clear team selection so the player must pick again (the just-dispatched team is now blocked)
     setSelectedTeamId(null);
   };
 
   const handleClearMission = (teamId: string) => {
     clearTeamLocation(teamId);
+  };
+
+  const handleClaimBase = () => {
+    if (!selectedLocationId || !area) return;
+    if (!selectedLocation?.cleared) return;
+    claimBase(area.id, selectedLocationId);
   };
 
   const pendingMissions = missions.filter((m) => m.status === "pending");
@@ -1020,7 +1033,9 @@ export function WorldMapView() {
       {/* 3D Map */}
       <Card className="bg-stone-950 border-stone-800 overflow-hidden h-[60vh] lg:h-[75vh] relative">
         <div className="absolute top-3 left-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-3 py-1.5">
-          <div className="text-xs text-stone-400">WORLD MAP</div>
+          <div className="text-xs text-amber-300 font-bold">
+            {area?.name ?? "Unknown Area"}
+          </div>
           <div className="text-[10px] text-stone-500">
             Click a location to scout • Drag to pan • Scroll to zoom
           </div>
@@ -1192,7 +1207,30 @@ export function WorldMapView() {
               </div>
             </div>
 
+            {/* Claim Base (if area has no base and location is cleared) */}
+            {area && !area.hasBase && selectedLocation?.cleared && (
+              <div className="mt-3 pt-3 border-t border-stone-800">
+                <div className="text-[10px] uppercase tracking-wide text-amber-500 mb-1.5 flex items-center gap-1">
+                  <HomeIcon className="w-3 h-3" />
+                  Establish Base
+                </div>
+                <div className="text-[11px] text-stone-400 mb-2 leading-snug">
+                  Claim this cleared location as your base in {area.name}. This
+                  will set up a shelter and allow you to build.
+                </div>
+                <Button
+                  size="sm"
+                  className="w-full bg-amber-700 hover:bg-amber-600 text-amber-50"
+                  onClick={handleClaimBase}
+                >
+                  <HomeIcon className="w-3 h-3 mr-1" />
+                  Claim as Base
+                </Button>
+              </div>
+            )}
+
             {/* Assign team / Salvage */}
+            {area?.hasBase && (
             <div className="mt-3 pt-3 border-t border-stone-800">
               {isSalvageMission ? (
                 <>
@@ -1307,6 +1345,7 @@ export function WorldMapView() {
                 </Button>
               )}
             </div>
+            )}
           </Card>
         ) : (
           <Card className="bg-stone-900/40 border-stone-800 border-dashed p-6 text-center">

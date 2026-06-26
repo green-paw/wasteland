@@ -1,7 +1,7 @@
 "use client";
 
 import { useGameStore, selectSurvivorCapacity } from "@/game/store";
-import { BUILDING_DEFS, getUpgradeCost } from "@/game/data";
+import { BUILDING_DEFS, getUpgradeCost, RESOURCE_INFO } from "@/game/data";
 import { BuildingType, Survivor } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,11 +14,10 @@ import {
   Users,
   ShieldAlert,
   ArrowUp,
-  Plus,
   CheckCircle2,
   AlertCircle,
+  MapPin,
 } from "lucide-react";
-import { RESOURCE_INFO } from "@/game/data";
 import { CharacterIcon } from "./CharacterIcon";
 
 const BUILDING_ORDER: BuildingType[] = [
@@ -33,13 +32,37 @@ const BUILDING_ORDER: BuildingType[] = [
 ];
 
 export function BaseView() {
-  const buildings = useGameStore((s) => s.buildings);
-  const survivors = useGameStore((s) => s.survivors);
-  const resources = useGameStore((s) => s.resources);
+  const area = useGameStore((s) => s.areas[s.currentAreaId]);
+  const allSurvivors = useGameStore((s) => s.survivors);
   const upgradeBuilding = useGameStore((s) => s.upgradeBuilding);
   const repairBuilding = useGameStore((s) => s.repairBuilding);
 
-  const capacity = selectSurvivorCapacity(useGameStore.getState());
+  if (!area) return null;
+
+  const buildings = area.buildings;
+  const resources = area.resources;
+
+  const survivors: Survivor[] = area.survivorIds
+    .map((id) => allSurvivors[id])
+    .filter(Boolean);
+
+  const capacity = selectSurvivorCapacity(area);
+
+  // No base established in this area — show guidance instead of the base UI.
+  if (!area.hasBase) {
+    return (
+      <div className="space-y-4">
+        <AreaHeader name={area.name} />
+        <Card className="bg-stone-900/60 border-stone-800 p-6 flex flex-col items-center text-center">
+          <AlertCircle className="w-8 h-8 text-amber-400 mb-2" />
+          <p className="text-sm text-stone-300 max-w-md">
+            No base established in this area. Clear a location in the Area Map
+            and claim it as your base.
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
   const injuredSurvivors = survivors.filter(
     (s) => s.status === "injured" || s.status === "critical" || s.status === "sick"
@@ -47,6 +70,8 @@ export function BaseView() {
 
   return (
     <div className="space-y-4">
+      <AreaHeader name={area.name} />
+
       {/* Overview cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <OverviewCard
@@ -247,14 +272,31 @@ export function BaseView() {
         <h2 className="text-sm uppercase tracking-wide text-stone-500 mb-2 px-1">
           Survivor Roster
         </h2>
-        <Card className="bg-stone-900/60 border-stone-800 p-3">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-            {survivors.map((s) => (
-              <SurvivorMiniCard key={s.id} survivor={s} />
-            ))}
-          </div>
-        </Card>
+        {survivors.length === 0 ? (
+          <Card className="bg-stone-900/60 border-stone-800 p-6 text-center">
+            <p className="text-sm text-stone-300">
+              No survivors in this area. Send some from the World Map.
+            </p>
+          </Card>
+        ) : (
+          <Card className="bg-stone-900/60 border-stone-800 p-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              {survivors.map((s) => (
+                <SurvivorMiniCard key={s.id} survivor={s} />
+              ))}
+            </div>
+          </Card>
+        )}
       </div>
+    </div>
+  );
+}
+
+function AreaHeader({ name }: { name: string }) {
+  return (
+    <div className="flex items-center gap-2 px-1">
+      <MapPin className="w-4 h-4 text-stone-500" />
+      <h2 className="text-base font-semibold text-stone-100">{name}</h2>
     </div>
   );
 }

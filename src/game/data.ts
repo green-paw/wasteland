@@ -1,4 +1,5 @@
 import {
+  AreaType,
   BuildingType,
   EnemyType,
   LocationType,
@@ -336,3 +337,194 @@ export function getMaxTeamSize(barracksLevel: number): number {
 export function getSurvivorCapacity(shelterLevel: number): number {
   return 1 + shelterLevel * 2;
 }
+
+// ============== Area Types (hex-grid world map) ==============
+
+export interface AreaTypeDef {
+  type: AreaType;
+  label: string;
+  icon: string;
+  description: string;
+  // How many locations to generate when the area is discovered.
+  locationCount: [number, number];
+  // Weights for each location type — higher = more common.
+  locationWeights: Partial<Record<LocationType, number>>;
+  // Base danger bias for the area (added to each location's base danger, clamped 1-5).
+  dangerBias: number;
+  // Color used on the hex grid.
+  color: string;
+}
+
+export const AREA_TYPE_DEFS: Record<AreaType, AreaTypeDef> = {
+  farm: {
+    type: "farm",
+    label: "Farmland",
+    icon: "🌾",
+    description: "Open fields, scattered farmhouses. Low danger, plenty of food.",
+    locationCount: [6, 9],
+    locationWeights: {
+      abandoned_house: 5,
+      supermarket: 1,
+      gas_station: 1,
+      church: 1,
+      school: 1,
+    },
+    dangerBias: -1,
+    color: "#7a8a4a",
+  },
+  village: {
+    type: "village",
+    label: "Village",
+    icon: "🏘️",
+    description: "A small settlement. Quiet, modest supplies, low danger.",
+    locationCount: [7, 10],
+    locationWeights: {
+      abandoned_house: 4,
+      church: 2,
+      school: 2,
+      pharmacy: 1,
+      gas_station: 1,
+    },
+    dangerBias: 0,
+    color: "#8a7a5a",
+  },
+  town: {
+    type: "town",
+    label: "Town",
+    icon: "🏙️",
+    description: "A mid-size town. Mixed supplies, medium danger.",
+    locationCount: [9, 12],
+    locationWeights: {
+      supermarket: 3,
+      pharmacy: 2,
+      school: 2,
+      church: 1,
+      gas_station: 2,
+      warehouse: 2,
+      abandoned_house: 2,
+    },
+    dangerBias: 0,
+    color: "#5a7a8a",
+  },
+  city: {
+    type: "city",
+    label: "City",
+    icon: "🌆",
+    description: "Dense urban ruins. Rich loot, but dangerous.",
+    locationCount: [11, 14],
+    locationWeights: {
+      supermarket: 3,
+      hospital: 2,
+      warehouse: 2,
+      factory: 2,
+      pharmacy: 2,
+      gas_station: 1,
+      abandoned_house: 1,
+    },
+    dangerBias: 1,
+    color: "#4a4a6a",
+  },
+  military: {
+    type: "military",
+    label: "Military Zone",
+    icon: "🎖️",
+    description: "Fortified military installations. High danger, rare gear.",
+    locationCount: [6, 9],
+    locationWeights: {
+      military_base: 5,
+      warehouse: 2,
+      gas_station: 2,
+      hospital: 1,
+    },
+    dangerBias: 2,
+    color: "#5a6b3a",
+  },
+  industrial: {
+    type: "industrial",
+    label: "Industrial Park",
+    icon: "🏭",
+    description: "Factories and warehouses. Materials-rich, hostile.",
+    locationCount: [7, 10],
+    locationWeights: {
+      factory: 4,
+      warehouse: 3,
+      gas_station: 2,
+      abandoned_house: 1,
+    },
+    dangerBias: 1,
+    color: "#6a5a4a",
+  },
+  wilderness: {
+    type: "wilderness",
+    label: "Wilderness",
+    icon: "🌲",
+    description: "Overgrown countryside. Few buildings, very low danger.",
+    locationCount: [4, 6],
+    locationWeights: {
+      abandoned_house: 3,
+      church: 2,
+      gas_station: 1,
+    },
+    dangerBias: -1,
+    color: "#4a6a4a",
+  },
+  ruins: {
+    type: "ruins",
+    label: "Ruins",
+    icon: "🏚️",
+    description: "A long-abandoned area. Mixed danger, picked clean.",
+    locationCount: [6, 9],
+    locationWeights: {
+      abandoned_house: 4,
+      factory: 2,
+      church: 1,
+      school: 1,
+      warehouse: 1,
+    },
+    dangerBias: 0,
+    color: "#5a5a5a",
+  },
+};
+
+export const ALL_AREA_TYPES = Object.keys(AREA_TYPE_DEFS) as AreaType[];
+
+// Names used for area generation
+export const AREA_NAME_PREFIXES = [
+  "Old", "New", "North", "South", "East", "West", "Lost", "Forgotten",
+  "Broken", "Dead", "Hollow", "Silent", "Dusty", "Rusted", "Shattered",
+];
+export const AREA_NAME_SUFFIXES = [
+  "Hollow", "Crossing", "Reach", "Hollow", "Fields", "Heights", "Vale",
+  "Ridge", "Mills", "Creek", "Junction", "Pond", "Grove", "Fork", "Pass",
+];
+
+// Hex grid math (axial coordinates)
+export const HEX_NEIGHBORS: [number, number][] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, -1],
+  [-1, 1],
+];
+
+export function hexDistance(a: [number, number], b: [number, number]): number {
+  return (
+    (Math.abs(a[0] - b[0]) +
+      Math.abs(a[0] + a[1] - b[0] - b[1]) +
+      Math.abs(a[1] - b[1])) /
+    2
+  );
+}
+
+export function getNeighborHexes(hex: [number, number]): [number, number][] {
+  return HEX_NEIGHBORS.map(([dq, dr]) => [hex[0] + dq, hex[1] + dr]);
+}
+
+export function hexToPixel(hex: [number, number], size: number): [number, number] {
+  const [q, r] = hex;
+  const x = size * (3 / 2) * q;
+  const y = size * Math.sqrt(3) * (r + q / 2);
+  return [x, y];
+}
+

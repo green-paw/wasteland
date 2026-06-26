@@ -1,0 +1,1199 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { create } from "zustand";
+     4→     4→import {
+     5→     5→  Area,
+     6→     6→  Building,
+     7→     7→  BuildingType,
+     8→     8→  GameLocation,
+     9→     9→  GameLogEntry,
+    10→    10→  GameState,
+    11→    11→  Mission,
+    12→    12→  MissionResult,
+    13→    13→  Resources,
+    14→    14→  ResourceType,
+    15→    15→  Survivor,
+    16→    16→  Team,
+    17→    17→  Transfer,
+    18→    18→} from "./types";
+    19→    19→import {
+    20→    20→  AREA_TYPE_DEFS,
+    21→    21→  BUILDING_DEFS,
+    22→    22→  ENEMY_INFO,
+    23→    23→  getNeighborHexes,
+    24→    24→  getSurvivorCapacity,
+    25→    25→  getMaxTeamSize,
+    26→    26→  getUpgradeCost,
+    27→    27→  INITIAL_RESOURCE_CAPS,
+    28→    28→  INITIAL_RESOURCES,
+    29→    29→  LOCATION_DEFS,
+    30→    30→} from "./data";
+    31→    31→import {
+    32→    32→  generateAreaLocations,
+    33→    33→  generateSurvivor,
+    34→    34→  generateWorld,
+    35→    35→  makeRng,
+    36→    36→  pick,
+    37→    37→  randInt,
+    38→    38→} from "./worldGen";
+    39→    39→
+    40→    40→// ---------- Helpers ----------
+    41→    41→function emptyResources(): Resources {
+    42→    42→  return { food: 0, water: 0, materials: 0, medicine: 0, fuel: 0, ammo: 0 };
+    43→    43→}
+    44→    44→
+    45→    45→function clampResources(res: Resources, caps: Resources): Resources {
+    46→    46→  const out: Resources = { ...res };
+    47→    47→  (Object.keys(out) as ResourceType[]).forEach((k) => {
+    48→    48→    out[k] = Math.max(0, Math.min(caps[k], out[k]));
+    49→    49→  });
+    50→    50→  return out;
+    51→    51→}
+    52→    52→
+    53→    53→function canAfford(res: Resources, cost: Partial<Resources>): boolean {
+    54→    54→  for (const [k, v] of Object.entries(cost)) {
+    55→    55→    if (res[k as ResourceType] < (v as number)) return false;
+    56→    56→  }
+    57→    57→  return true;
+    58→    58→}
+    59→    59→
+    60→    60→function subtractCost(res: Resources, cost: Partial<Resources>): Resources {
+    61→    61→  const out = { ...res };
+    62→    62→  for (const [k, v] of Object.entries(cost)) {
+    63→    63→    out[k as ResourceType] -= v as number;
+    64→    64→  }
+    65→    65→  return out;
+    66→    66→}
+    67→    67→
+    68→    68→function initialBuildings(): Record<BuildingType, Building> {
+    69→    69→  const out = {} as Record<BuildingType, Building>;
+    70→    70→  (Object.keys(BUILDING_DEFS) as BuildingType[]).forEach((type) => {
+    71→    71→    const def = BUILDING_DEFS[type];
+    72→    72→    out[type] = {
+    73→    73→      type,
+    74→    74→      level: def.startingLevel,
+    75→    75→      maxLevel: def.maxLevel,
+    76→    76→      hp: def.baseHp,
+    77→    77→      maxHp: def.baseHp,
+    78→    78→    };
+    79→    79→  });
+    80→    80→  return out;
+    81→    81→}
+    82→    82→
+    83→    83→function emptyBuildings(): Record<BuildingType, Building> {
+    84→    84→  const out = {} as Record<BuildingType, Building>;
+    85→    85→  (Object.keys(BUILDING_DEFS) as BuildingType[]).forEach((type) => {
+    86→    86→    const def = BUILDING_DEFS[type];
+    87→    87→    out[type] = {
+    88→    88→      type,
+    89→    89→      level: 0,
+    90→    90→      maxLevel: def.maxLevel,
+    91→    91→      hp: 0,
+    92→    92→      maxHp: def.baseHp,
+    93→    93→    };
+    94→    94→  });
+    95→    95→  return out;
+    96→    96→}
+    97→    97→
+    98→    98→// Baseless areas get a small cap so they can temporarily hold scavenged resources.
+    99→    99→const BASELESS_CAPS: Resources = {
+   100→   100→  food: 20,
+   101→   101→  water: 20,
+   102→   102→  materials: 20,
+   103→   103→  medicine: 10,
+   104→   104→  fuel: 10,
+   105→   105→  ammo: 10,
+   106→   106→};
+   107→   107→
+   108→   108→function calculateCaps(area: Area): Resources {
+   109→   109→  if (!area.hasBase) return { ...BASELESS_CAPS };
+   110→   110→  const base = { ...INITIAL_RESOURCE_CAPS };
+   111→   111→  const storageLevel = area.buildings.storage.level;
+   112→   112→  (Object.keys(base) as ResourceType[]).forEach((k) => {
+   113→   113→    base[k] += storageLevel * 50;
+   114→   114→  });
+   115→   115→  return base;
+   116→   116→}
+   117→   117→
+   118→   118→// ---------- Initial State ----------
+   119→   119→function createInitialState(): GameState {
+   120→   120→  const starter = generateSurvivor(1);
+   121→   121→  starter.role = "idle";
+   122→   122→  return {
+   123→   123→    day: 1,
+   124→   124→    started: false,
+   125→   125→    areas: {},
+   126→   126→    currentAreaId: "",
+   127→   127→    survivors: { [starter.id]: starter },
+   128→   128→    transfers: [],
+   129→   129→    log: [
+   130→   130→      {
+   131→   131→        day: 1,
+   132→   132→        message:
+   133→   133→          "You wake up alone in an abandoned shelter. The world has fallen. Survive.",
+   134→   134→        type: "info",
+   135→   135→      },
+   136→   136→    ],
+   137→   137→    gameOver: false,
+   138→   138→  };
+   139→   139→}
+   140→   140→
+   141→   141→// ---------- Store Interface ----------
+   142→   142→interface GameStore extends GameState {
+   143→   143→  startGame: () => void;
+   144→   144→  resetGame: () => void;
+   145→   145→
+   146→   146→  // area navigation
+   147→   147→  setCurrentArea: (areaId: string) => void;
+   148→   148→  travelToArea: (areaId: string, survivorIds: string[]) => void;
+   149→   149→  claimBase: (areaId: string, locationId: string) => void;
+   150→   150→
+   151→   151→  // resource transfer between areas
+   152→   152→  transferResources: (
+   153→   153→    fromAreaId: string,
+   154→   154→    toAreaId: string,
+   155→   155→    resources: Partial<Resources>
+   156→   156→  ) => void;
+   157→   157→
+   158→   158→  // building actions (operate on current area)
+   159→   159→  upgradeBuilding: (type: BuildingType) => void;
+   160→   160→  repairBuilding: (type: BuildingType) => void;
+   161→   161→
+   162→   162→  // team actions (operate on current area)
+   163→   163→  createTeam: (name: string) => string | null;
+   164→   164→  deleteTeam: (teamId: string) => void;
+   165→   165→  assignSurvivorToTeam: (survivorId: string, teamId: string) => void;
+   166→   166→  unassignSurvivorFromTeam: (survivorId: string) => void;
+   167→   167→  assignTeamToLocation: (teamId: string, locationId: string) => void;
+   168→   168→  assignTeamToSalvage: (teamId: string, locationId: string) => void;
+   169→   169→  clearTeamLocation: (teamId: string) => void;
+   170→   170→  autoAssignSurvivors: () => void;
+   171→   171→
+   172→   172→  // survivor actions (operate on current area)
+   173→   173→  setSurvivorResting: (survivorId: string, resting: boolean) => void;
+   174→   174→
+   175→   175→  // main loop
+   176→   176→  endDay: () => void;
+   177→   177→}
+   178→   178→
+   179→   179→// ---------- Resolve a scout Mission (combat + loot) ----------
+   180→   180→function resolveMission(
+   181→   181→  mission: Mission,
+   182→   182→  survivors: Survivor[],
+   183→   183→  location: GameLocation,
+   184→   184→  day: number
+   185→   185→): { result: MissionResult; log: GameLogEntry[] } {
+   186→   186→  const log: GameLogEntry[] = [];
+   187→   187→  const teamSurvivors = survivors.filter((s) => mission.team.includes(s.id));
+   188→   188→  const rng = makeRng(
+   189→   189→    mission.id
+   190→   190→      .split("")
+   191→   191→      .reduce((a, c) => a + c.charCodeAt(0), 0) +
+   192→   192→      day * 7919 +
+   193→   193→      location.position[0] * 31
+   194→   194→  );
+   195→   195→
+   196→   196→  const result: MissionResult = {
+   197→   197→    success: true,
+   198→   198→    lootGained: {},
+   199→   199→    survivorsRecruited: [],
+   200→   200→    casualties: [],
+   201→   201→    injuries: [],
+   202→   202→    log: [],
+   203→   203→  };
+   204→   204→
+   205→   205→  if (!location.cleared && location.enemyCount > 0) {
+   206→   206→    const enemyDef = ENEMY_INFO[location.enemyType];
+   207→   207→    const teamCombat =
+   208→   208→      teamSurvivors.reduce((sum, s) => sum + s.skills.combat, 0) +
+   209→   209→      teamSurvivors.reduce((sum, s) => sum + (s.health > 50 ? 1 : 0), 0) * 0.5;
+   210→   210→    const enemyPower = location.enemyCount * enemyDef.combatPower;
+   211→   211→
+   212→   212→    result.log.push(
+   213→   213→      `Team encountered ${location.enemyCount} ${enemyDef.label} at ${location.name}.`
+   214→   214→    );
+   215→   215→
+   216→   216→    if (teamCombat >= enemyPower) {
+   217→   217→      result.success = true;
+   218→   218→      result.log.push(
+   219→   219→        `Victory! Team combat ${teamCombat.toFixed(1)} vs enemy ${enemyPower.toFixed(1)}.`
+   220→   220→      );
+   221→   221→      teamSurvivors.forEach((s) => {
+   222→   222→        const injuryChance = 0.15 + location.dangerLevel * 0.05;
+   223→   223→        if (rng() < injuryChance) {
+   224→   224→          const dmg = randInt(rng, 10, 30);
+   225→   225→          s.health = Math.max(1, s.health - dmg);
+   226→   226→          s.status = s.health < 30 ? "critical" : "injured";
+   227→   227→          result.injuries.push(s.id);
+   228→   228→          result.log.push(`${s.name} was injured (-${dmg} HP).`);
+   229→   229→        }
+   230→   230→      });
+   231→   231→    } else {
+   232→   232→      result.success = false;
+   233→   233→      result.log.push(
+   234→   234→        `Defeat! Team combat ${teamCombat.toFixed(1)} vs enemy ${enemyPower.toFixed(1)}.`
+   235→   235→      );
+   236→   236→      teamSurvivors.forEach((s) => {
+   237→   237→        const deathChance = 0.1 + Math.max(0, enemyPower - teamCombat) * 0.05;
+   238→   238→        if (rng() < deathChance) {
+   239→   239→          result.casualties.push(s.id);
+   240→   240→          result.log.push(`${s.name} was killed in action.`);
+   241→   241→        } else {
+   242→   242→          const dmg = randInt(rng, 25, 55);
+   243→   243→          s.health = Math.max(5, s.health - dmg);
+   244→   244→          s.status = s.health < 30 ? "critical" : "injured";
+   245→   245→          result.injuries.push(s.id);
+   246→   246→          result.log.push(`${s.name} was badly injured (-${dmg} HP).`);
+   247→   247→        }
+   248→   248→      });
+   249→   249→      const halfLoot: Partial<Resources> = {};
+   250→   250→      for (const [k, v] of Object.entries(location.loot)) {
+   251→   251→        halfLoot[k as ResourceType] = Math.floor((v as number) * 0.4);
+   252→   252→      }
+   253→   253→      result.lootGained = halfLoot;
+   254→   254→    }
+   255→   255→  } else {
+   256→   256→    result.log.push(`No hostiles at ${location.name}.`);
+   257→   257→  }
+   258→   258→
+   259→   259→  if (result.success && !location.cleared) {
+   260→   260→    const scavenging = teamSurvivors.reduce(
+   261→   261→      (sum, s) => sum + s.skills.scavenging,
+   262→   262→      0
+   263→   263→    );
+   264→   264→    const lootMultiplier = 0.5 + scavenging * 0.15 + rng() * 0.3;
+   265→   265→    const loot: Partial<Resources> = {};
+   266→   266→    for (const [k, v] of Object.entries(location.loot)) {
+   267→   267→      loot[k as ResourceType] = Math.max(
+   268→   268→        0,
+   269→   269→        Math.round((v as number) * lootMultiplier)
+   270→   270→      );
+   271→   271→    }
+   272→   272→    result.lootGained = { ...result.lootGained, ...loot };
+   273→   273→    const lootSummary = Object.entries(loot)
+   274→   274→      .filter(([, v]) => (v as number) > 0)
+   275→   275→      .map(([k, v]) => `${v} ${k}`)
+   276→   276→      .join(", ");
+   277→   277→    if (lootSummary) {
+   278→   278→      result.log.push(`Salvaged: ${lootSummary}.`);
+   279→   279→    }
+   280→   280→  }
+   281→   281→
+   282→   282→  if (result.success && !location.cleared) {
+   283→   283→    if (rng() < location.survivorChance) {
+   284→   284→      const newSurvivor = generateSurvivor(
+   285→   285→        Math.floor(rng() * 1000000) + day * 13
+   286→   286→      );
+   287→   287→      newSurvivor.health = randInt(rng, 50, 90);
+   288→   288→      newSurvivor.hunger = randInt(rng, 30, 70);
+   289→   289→      newSurvivor.thirst = randInt(rng, 30, 70);
+   290→   290→      newSurvivor.morale = randInt(rng, 30, 70);
+   291→   291→      result.survivorsRecruited.push(newSurvivor);
+   292→   292→      result.log.push(
+   293→   293→        `Found a survivor named ${newSurvivor.name}! They joined your group.`
+   294→   294→      );
+   295→   295→    }
+   296→   296→  }
+   297→   297→
+   298→   298→  location.explored = true;
+   299→   299→  if (result.success) {
+   300→   300→    location.cleared = true;
+   301→   301→    location.enemyCount = 0;
+   302→   302→  }
+   303→   303→
+   304→   304→  result.log.forEach((msg) =>
+   305→   305→    log.push({
+   306→   306→      day,
+   307→   307→      message: msg,
+   308→   308→      type: msg.includes("killed")
+   309→   309→        ? "danger"
+   310→   310→        : msg.includes("injured") || msg.includes("Defeat")
+   311→   311→        ? "warning"
+   312→   312→        : msg.includes("Victory") ||
+   313→   313→          msg.includes("Salvaged") ||
+   314→   314→          msg.includes("Found")
+   315→   315→        ? "success"
+   316→   316→        : "info",
+   317→   317→    })
+   318→   318→  );
+   319→   319→
+   320→   320→  return { result, log };
+   321→   321→}
+   322→   322→
+   323→   323→// ---------- Process a single area for the day ----------
+   324→   324→function processArea(
+   325→   325→  area: Area,
+   326→   326→  allSurvivors: Record<string, Survivor>,
+   327→   327→  day: number,
+   328→   328→  newLog: GameLogEntry[]
+   329→   329→): { survivorsDied: string[] } {
+   330→   330→  const survivorsDied: string[] = [];
+   331→   331→
+   332→   332→  if (!area.hasBase && area.survivorIds.length === 0 && area.missions.length === 0) {
+   333→   333→    return { survivorsDied };
+   334→   334→  }
+   335→   335→
+   336→   336→  const areaSurvivors = area.survivorIds
+   337→   337→    .map((id) => allSurvivors[id])
+   338→   338→    .filter((s) => s !== undefined);
+   339→   339→  let resources = { ...area.resources };
+   340→   340→
+   341→   341→  newLog.push({
+   342→   342→    day,
+   343→   343→    message: `--- ${area.name} (Day ${day}) ---`,
+   344→   344→    type: "info",
+   345→   345→  });
+   346→   346→
+   347→   347→  // ---------- 1. Resolve pending missions ----------
+   348→   348→  area.missions = area.missions.map((m) => {
+   349→   349→    if (m.status !== "pending") return m;
+   350→   350→    const location = area.locations.find((l) => l.id === m.locationId);
+   351→   351→    if (!location) return { ...m, status: "completed" as const };
+   352→   352→
+   353→   353→    const teamSurvivors = m.team
+   354→   354→      .map((id) => allSurvivors[id])
+   355→   355→      .filter((s) => s !== undefined);
+   356→   356→
+   357→   357→    if (m.missionType !== "salvage") {
+   358→   358→      teamSurvivors.forEach((s) => {
+   359→   359→        s.role = "onMission";
+   360→   360→      });
+   361→   361→    }
+   362→   362→
+   363→   363→    // -------- Salvage mission --------
+   364→   364→    if (m.missionType === "salvage") {
+   365→   365→      const salvageRng = makeRng(
+   366→   366→        m.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) + day * 7919
+   367→   367→      );
+   368→   368→      const totalScavenge = teamSurvivors.reduce(
+   369→   369→        (sum, s) => sum + s.skills.scavenging,
+   370→   370→        0
+   371→   371→      );
+   372→   372→      const salvageWork = totalScavenge + teamSurvivors.length * 2;
+   373→   373→      const poolEntries = Object.entries(location.salvagePool).filter(
+   374→   374→        ([, v]) => (v as number) > 0
+   375→   375→      ) as [ResourceType, number][];
+   376→   376→
+   377→   377→      const lootGained: Partial<Resources> = {};
+   378→   378→      let depletedThisRun = false;
+   379→   379→
+   380→   380→      if (poolEntries.length === 0) {
+   381→   381→        location.salvageDepleted = true;
+   382→   382→        depletedThisRun = true;
+   383→   383→      } else {
+   384→   384→        const hasMaterials = poolEntries.some(([k]) => k === "materials");
+   385→   385→        const otherEntries = poolEntries.filter(([k]) => k !== "materials");
+   386→   386→        const allocations: [ResourceType, number][] = [];
+   387→   387→        if (hasMaterials) {
+   388→   388→          allocations.push(["materials", salvageWork * 0.5]);
+   389→   389→        }
+   390→   390→        if (otherEntries.length > 0) {
+   391→   391→          const perType = (salvageWork * (hasMaterials ? 0.5 : 1)) / otherEntries.length;
+   392→   392→          for (const [k] of otherEntries) {
+   393→   393→            allocations.push([k, perType]);
+   394→   394→          }
+   395→   395→        }
+   396→   396→        for (const [k, work] of allocations) {
+   397→   397→          const remaining = location.salvagePool[k] ?? 0;
+   398→   398→          if (remaining <= 0) continue;
+   399→   399→          const yield_ = Math.max(1, Math.round(work * (0.8 + salvageRng() * 0.4)));
+   400→   400→          const extracted = Math.min(remaining, yield_);
+   401→   401→          location.salvagePool[k] = remaining - extracted;
+   402→   402→          lootGained[k] = extracted;
+   403→   403→        }
+   404→   404→        const totalRemaining = Object.values(location.salvagePool).reduce(
+   405→   405→          (sum, v) => sum + (v as number),
+   406→   406→          0
+   407→   407→        );
+   408→   408→        if (totalRemaining <= 0) {
+   409→   409→          location.salvageDepleted = true;
+   410→   410→          depletedThisRun = true;
+   411→   411→        }
+   412→   412→        const lootSummary = Object.entries(lootGained)
+   413→   413→          .filter(([, v]) => (v as number) > 0)
+   414→   414→          .map(([k, v]) => `${v} ${k}`)
+   415→   415→          .join(", ");
+   416→   416→        if (lootSummary) {
+   417→   417→          newLog.push({
+   418→   418→            day,
+   419→   419→            message: `[${area.name}] Salvaged: ${lootSummary}.`,
+   420→   420→            type: "success",
+   421→   421→          });
+   422→   422→        }
+   423→   423→        if (depletedThisRun) {
+   424→   424→          newLog.push({
+   425→   425→            day,
+   426→   426→            message: `[${area.name}] ${location.name} fully salvaged.`,
+   427→   427→            type: "warning",
+   428→   428→          });
+   429→   429→        }
+   430→   430→      }
+   431→   431→
+   432→   432→      for (const [k, v] of Object.entries(lootGained)) {
+   433→   433→        resources[k as ResourceType] += v as number;
+   434→   434→      }
+   435→   435→
+   436→   436→      if (depletedThisRun) {
+   437→   437→        teamSurvivors.forEach((s) => {
+   438→   438→          s.role = "idle";
+   439→   439→          s.assignedTeamId = undefined;
+   440→   440→        });
+   441→   441→        const team = area.teams.find((t) => t.id === m.teamId);
+   442→   442→        if (team) team.locationId = null;
+   443→   443→        return { ...m, status: "completed" as const };
+   444→   444→      }
+   445→   445→      return m; // stays pending
+   446→   446→    }
+   447→   447→
+   448→   448→    // -------- Scout mission --------
+   449→   449→    const { result, log } = resolveMission(m, teamSurvivors, location, day);
+   450→   450→    newLog.push(...log);
+   451→   451→
+   452→   452→    for (const [k, v] of Object.entries(result.lootGained)) {
+   453→   453→      resources[k as ResourceType] += v as number;
+   454→   454→    }
+   455→   455→
+   456→   456→    result.casualties.forEach((id) => survivorsDied.push(id));
+   457→   457→    result.survivorsRecruited.forEach((ns) => {
+   458→   458→      allSurvivors[ns.id] = ns;
+   459→   459→      area.survivorIds.push(ns.id);
+   460→   460→    });
+   461→   461→
+   462→   462→    teamSurvivors.forEach((s) => {
+   463→   463→      const updated = allSurvivors[s.id];
+   464→   464→      if (updated) {
+   465→   465→        updated.role = "idle";
+   466→   466→        updated.assignedTeamId = undefined;
+   467→   467→      }
+   468→   468→    });
+   469→   469→
+   470→   470→    const team = area.teams.find((t) => t.id === m.teamId);
+   471→   471→    if (team) team.locationId = null;
+   472→   472→
+   473→   473→    return { ...m, status: "completed" as const, result };
+   474→   474→  });
+   475→   475→
+   476→   476→  area.missions = area.missions.filter((m) => m.status === "pending");
+   477→   477→
+   478→   478→  // ---------- 2. Building production ----------
+   479→   479→  if (area.hasBase) {
+   480→   480→    const farmFood = area.buildings.farm.level * 5;
+   481→   481→    const wellWater = area.buildings.well.level * 5;
+   482→   482→    if (farmFood > 0) {
+   483→   483→      resources.food += farmFood;
+   484→   484→      newLog.push({ day, message: `[${area.name}] Farm produced ${farmFood} food.`, type: "success" });
+   485→   485→    }
+   486→   486→    if (wellWater > 0) {
+   487→   487→      resources.water += wellWater;
+   488→   488→      newLog.push({ day, message: `[${area.name}] Well produced ${wellWater} water.`, type: "success" });
+   489→   489→    }
+   490→   490→  }
+   491→   491→
+   492→   492→  // ---------- 3. Survivor consumption ----------
+   493→   493→  const consumption = areaSurvivors.length;
+   494→   494→  const foodNeeded = consumption;
+   495→   495→  const waterNeeded = consumption;
+   496→   496→  let foodShortage = 0;
+   497→   497→  let waterShortage = 0;
+   498→   498→
+   499→   499→  if (resources.food >= foodNeeded) {
+   500→   500→    resources.food -= foodNeeded;
+   501→   501→  } else {
+   502→   502→    foodShortage = foodNeeded - resources.food;
+   503→   503→    resources.food = 0;
+   504→   504→  }
+   505→   505→  if (resources.water >= waterNeeded) {
+   506→   506→    resources.water -= waterNeeded;
+   507→   507→  } else {
+   508→   508→    waterShortage = waterNeeded - resources.water;
+   509→   509→    resources.water = 0;
+   510→   510→  }
+   511→   511→
+   512→   512→  if (foodShortage > 0) {
+   513→   513→    newLog.push({ day, message: `[${area.name}] Food shortage! ${foodShortage} survivors go hungry.`, type: "warning" });
+   514→   514→  } else if (consumption > 0) {
+   515→   515→    newLog.push({ day, message: `[${area.name}] Survivors consumed ${foodNeeded} food and ${waterNeeded} water.`, type: "info" });
+   516→   516→  }
+   517→   517→  if (waterShortage > 0) {
+   518→   518→    newLog.push({ day, message: `[${area.name}] Water shortage! ${waterShortage} survivors are dehydrated.`, type: "warning" });
+   519→   519→  }
+   520→   520→
+   521→   521→  // ---------- 4. Update survivor stats ----------
+   522→   522→  areaSurvivors.forEach((s) => {
+   523→   523→    if (foodShortage === 0 && s.role !== "onMission") {
+   524→   524→      s.hunger = Math.max(0, s.hunger - 30);
+   525→   525→    } else if (s.role === "onMission") {
+   526→   526→      s.hunger = Math.min(100, s.hunger + 10);
+   527→   527→    } else {
+   528→   528→      s.hunger = Math.min(100, s.hunger + 25);
+   529→   529→      s.health = Math.max(0, s.health - 5);
+   530→   530→    }
+   531→   531→
+   532→   532→    if (waterShortage === 0 && s.role !== "onMission") {
+   533→   533→      s.thirst = Math.max(0, s.thirst - 35);
+   534→   534→    } else if (s.role === "onMission") {
+   535→   535→      s.thirst = Math.min(100, s.thirst + 15);
+   536→   536→    } else {
+   537→   537→      s.thirst = Math.min(100, s.thirst + 30);
+   538→   538→      s.health = Math.max(0, s.health - 8);
+   539→   539→    }
+   540→   540→
+   541→   541→    if (s.hunger >= 90) {
+   542→   542→      s.health = Math.max(0, s.health - 8);
+   543→   543→      newLog.push({ day, message: `[${area.name}] ${s.name} is starving.`, type: "warning" });
+   544→   544→    }
+   545→   545→    if (s.thirst >= 90) {
+   546→   546→      s.health = Math.max(0, s.health - 10);
+   547→   547→      newLog.push({ day, message: `[${area.name}] ${s.name} is severely dehydrated.`, type: "warning" });
+   548→   548→    }
+   549→   549→
+   550→   550→    if (s.role === "resting") {
+   551→   551→      s.morale = Math.min(100, s.morale + 10);
+   552→   552→      s.health = Math.min(100, s.health + 5);
+   553→   553→    }
+   554→   554→    if (s.health < 30) {
+   555→   555→      s.morale = Math.max(0, s.morale - 5);
+   556→   556→    }
+   557→   557→  });
+   558→   558→
+   559→   559→  // ---------- 5. Healing ----------
+   560→   560→  if (area.hasBase && area.buildings.infirmary.level > 0) {
+   561→   561→    const heal = area.buildings.infirmary.level * 10;
+   562→   562→    areaSurvivors.forEach((s) => {
+   563→   563→      if (s.status !== "healthy" && s.health < 100) {
+   564→   564→        if (resources.medicine >= 1) {
+   565→   565→          resources.medicine -= 1;
+   566→   566→          s.health = Math.min(100, s.health + heal);
+   567→   567→          if (s.health >= 70) s.status = "healthy";
+   568→   568→          else if (s.health >= 40 && s.status === "critical") s.status = "injured";
+   569→   569→          newLog.push({ day, message: `[${area.name}] ${s.name} treated at infirmary (+${heal} HP).`, type: "success" });
+   570→   570→        }
+   571→   571→      }
+   572→   572→    });
+   573→   573→  } else {
+   574→   574→    areaSurvivors.forEach((s) => {
+   575→   575→      if (s.status !== "healthy" && s.health < 100) {
+   576→   576→        const naturalHeal = 3;
+   577→   577→        s.health = Math.min(100, s.health + naturalHeal);
+   578→   578→        if (s.health >= 70) s.status = "healthy";
+   579→   579→        else if (s.health >= 40 && s.status === "critical") s.status = "injured";
+   580→   580→      }
+   581→   581→    });
+   582→   582→  }
+   583→   583→
+   584→   584→  // Update status
+   585→   585→  areaSurvivors.forEach((s) => {
+   586→   586→    if (s.health <= 0) {
+   587→   587→      // dead
+   588→   588→    } else if (s.health < 25) {
+   589→   589→      s.status = "critical";
+   590→   590→    } else if (s.health < 50) {
+   591→   591→      s.status = s.status === "sick" ? "sick" : "injured";
+   592→   592→    } else if (s.health < 70 && (s.status === "injured" || s.status === "critical")) {
+   593→   593→      s.status = "injured";
+   594→   594→    } else if (s.health >= 70 && s.status !== "sick") {
+   595→   595→      s.status = "healthy";
+   596→   596→    }
+   597→   597→  });
+   598→   598→
+   599→   599→  // ---------- 6. Remove dead ----------
+   600→   600→  areaSurvivors.forEach((s) => {
+   601→   601→    if (s.health <= 0) {
+   602→   602→      survivorsDied.push(s.id);
+   603→   603→      newLog.push({ day, message: `[${area.name}] ${s.name} has died.`, type: "danger" });
+   604→   604→    }
+   605→   605→  });
+   606→   606→  area.survivorIds = area.survivorIds.filter((id) => {
+   607→   607→    const s = allSurvivors[id];
+   608→   608→    return s && s.health > 0;
+   609→   609→  });
+   610→   610→
+   611→   611→  // ---------- 7. Random bandit raid ----------
+   612→   612→  if (area.hasBase) {
+   613→   613→    const rng = makeRng(day * 9973 + 7 + area.hex[0] * 31 + area.hex[1] * 17);
+   614→   614→    if (day > 2 && rng() < 0.2) {
+   615→   615→      const raidPower = randInt(rng, 2, 4) + Math.floor(day / 3);
+   616→   616→      const defense =
+   617→   617→        area.buildings.watchtower.level * 15 +
+   618→   618→        areaSurvivors
+   619→   619→          .filter((s) => s.role === "idle")
+   620→   620→          .reduce((sum, s) => sum + s.skills.combat * 2, 0);
+   621→   621→
+   622→   622→      if (defense >= raidPower) {
+   623→   623→        resources.ammo = Math.max(0, resources.ammo - Math.min(resources.ammo, raidPower));
+   624→   624→        newLog.push({ day, message: `[${area.name}] Bandit raid repelled.`, type: "success" });
+   625→   625→      } else {
+   626→   626→        const stolenFood = Math.min(resources.food, randInt(rng, 5, 15));
+   627→   627→        const stolenWater = Math.min(resources.water, randInt(rng, 5, 15));
+   628→   628→        const stolenMats = Math.min(resources.materials, randInt(rng, 5, 15));
+   629→   629→        resources.food -= stolenFood;
+   630→   630→        resources.water -= stolenWater;
+   631→   631→        resources.materials -= stolenMats;
+   632→   632→        newLog.push({ day, message: `[${area.name}] Bandits broke through! Lost ${stolenFood} food, ${stolenWater} water, ${stolenMats} materials.`, type: "danger" });
+   633→   633→      }
+   634→   634→    }
+   635→   635→  }
+   636→   636→
+   637→   637→  // ---------- 8. Re-cap & save ----------
+   638→   638→  area.resourceCaps = calculateCaps(area);
+   639→   639→  area.resources = clampResources(resources, area.resourceCaps);
+   640→   640→
+   641→   641→  // Reset onMission survivors to idle
+   642→   642→  areaSurvivors.forEach((s) => {
+   643→   643→    if (s.role === "onMission") s.role = "idle";
+   644→   644→  });
+   645→   645→
+   646→   646→  return { survivorsDied };
+   647→   647→}
+   648→   648→
+   649→   649→// ---------- Process transfers for the day ----------
+   650→   650→function processTransfers(
+   651→   651→  state: GameState,
+   652→   652→  day: number,
+   653→   653→  newLog: GameLogEntry[]
+   654→   654→): Transfer[] {
+   655→   655→  const remaining: Transfer[] = [];
+   656→   656→  for (const transfer of state.transfers) {
+   657→   657→    if (transfer.arrivalDay <= day) {
+   658→   658→      // Arrived
+   659→   659→      const destArea = state.areas[transfer.toAreaId];
+   660→   660→      if (destArea) {
+   661→   661→        // If area is undiscovered, discover it now
+   662→   662→        if (!destArea.discovered) {
+   663→   663→          destArea.discovered = true;
+   664→   664→          destArea.locations = generateAreaLocations(
+   665→   665→            destArea.id,
+   666→   666→            destArea.type,
+   667→   667→            day * 1000 + destArea.hex[0] * 100 + destArea.hex[1]
+   668→   668→          );
+   669→   669→          newLog.push({
+   670→   670→            day,
+   671→   671→            message: `${destArea.name} has been discovered!`,
+   672→   672→            type: "success",
+   673→   673→          });
+   674→   674→        }
+   675→   675→        // Add survivors to destination area
+   676→   676→        for (const sid of transfer.survivorIds) {
+   677→   677→          if (!destArea.survivorIds.includes(sid)) {
+   678→   678→            destArea.survivorIds.push(sid);
+   679→   679→          }
+   680→   680→          // Reset their role
+   681→   681→          const s = state.survivors[sid];
+   682→   682→          if (s) {
+   683→   683→            s.role = "idle";
+   684→   684→            s.assignedTeamId = undefined;
+   685→   685→          }
+   686→   686→        }
+   687→   687→        // Add resources
+   688→   688→        for (const [k, v] of Object.entries(transfer.resources)) {
+   689→   689→          destArea.resources[k as ResourceType] += v as number;
+   690→   690→        }
+   691→   691→        destArea.resourceCaps = calculateCaps(destArea);
+   692→   692→        destArea.resources = clampResources(destArea.resources, destArea.resourceCaps);
+   693→   693→
+   694→   694→        const survNames = transfer.survivorIds
+   695→   695→          .map((id) => state.survivors[id]?.name)
+   696→   696→          .filter(Boolean)
+   697→   697→          .join(", ");
+   698→   698→        newLog.push({
+   699→   699→          day,
+   700→   700→          message: `Travelers arrived at ${destArea.name}${survNames ? `: ${survNames}` : ""}.`,
+   701→   701→          type: "info",
+   702→   702→        });
+   703→   703→      }
+   704→   704→    } else {
+   705→   705→      remaining.push(transfer);
+   706→   706→    }
+   707→   707→  }
+   708→   708→  return remaining;
+   709→   709→}
+   710→   710→
+   711→   711→// ---------- Store ----------
+   712→   712→export const useGameStore = create<GameStore>((set, get) => ({
+   713→   713→  ...createInitialState(),
+   714→   714→
+   715→   715→  startGame: () => {
+   716→   716→    const seed = Math.floor(Math.random() * 1000000);
+   717→   717→    const { areas, startAreaId } = generateWorld(seed);
+   718→   718→    const starter = Object.values(get().survivors)[0];
+   719→   719→    if (starter) {
+   720→   720→      areas[startAreaId].survivorIds.push(starter.id);
+   721→   721→    }
+   722→   722→    set({
+   723→   723→      started: true,
+   724→   724→      areas,
+   725→   725→      currentAreaId: startAreaId,
+   726→   726→      day: 1,
+   727→   727→    });
+   728→   728→  },
+   729→   729→
+   730→   730→  resetGame: () => {
+   731→   731→    set(createInitialState());
+   732→   732→  },
+   733→   733→
+   734→   734→  setCurrentArea: (areaId) => {
+   735→   735→    const state = get();
+   736→   736→    if (state.areas[areaId] && state.areas[areaId].discovered) {
+   737→   737→      set({ currentAreaId: areaId });
+   738→   738→    }
+   739→   739→  },
+   740→   740→
+   741→   741→  travelToArea: (areaId, survivorIds) => {
+   742→   742→    const state = get();
+   743→   743→    const fromArea = state.areas[state.currentAreaId];
+   744→   744→    const toArea = state.areas[areaId];
+   745→   745→    if (!fromArea || !toArea) return;
+   746→   746→
+   747→   747→    // Check adjacency
+   748→   748→    const neighbors = getNeighborHexes(fromArea.hex);
+   749→   749→    const isNeighbor = neighbors.some(([q, r]) => q === toArea.hex[0] && r === toArea.hex[1]);
+   750→   750→    if (!isNeighbor) return;
+   751→   751→
+   752→   752→    // Validate survivors are in the from area
+   753→   753→    const validSurvivors = survivorIds.filter((id) => fromArea.survivorIds.includes(id));
+   754→   754→    if (validSurvivors.length === 0) return;
+   755→   755→
+   756→   756→    // Remove survivors from source area
+   757→   757→    fromArea.survivorIds = fromArea.survivorIds.filter((id) => !validSurvivors.includes(id));
+   758→   758→
+   759→   759→    // Remove from any teams in source area
+   760→   760→    fromArea.teams = fromArea.teams.map((t) => ({
+   761→   761→      ...t,
+   762→   762→      memberIds: t.memberIds.filter((id) => !validSurvivors.includes(id)),
+   763→   763→    }));
+   764→   764→
+   765→   765→    // Set survivors to in-transit
+   766→   766→    validSurvivors.forEach((id) => {
+   767→   767→      const s = state.survivors[id];
+   768→   768→      if (s) {
+   769→   769→        s.role = "idle";
+   770→   770→        s.assignedTeamId = undefined;
+   771→   771→      }
+   772→   772→    });
+   773→   773→
+   774→   774→    // Create transfer
+   775→   775→    const transfer: Transfer = {
+   776→   776→      id: `transfer_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+   777→   777→      fromAreaId: fromArea.id,
+   778→   778→      toAreaId: toArea.id,
+   779→   779→      survivorIds: validSurvivors,
+   780→   780→      resources: {},
+   781→   781→      arrivalDay: state.day + 1,
+   782→   782→    };
+   783→   783→
+   784→   784→    set({
+   785→   785→      areas: { ...state.areas },
+   786→   786→      transfers: [...state.transfers, transfer],
+   787→   787→      log: [
+   788→   788→        ...state.log,
+   789→   789→        {
+   790→   790→          day: state.day,
+   791→   791→          message: `${validSurvivors.length} survivor(s) sent to ${toArea.name}. They will arrive tomorrow.`,
+   792→   792→          type: "info",
+   793→   793→        },
+   794→   794→      ].slice(-100),
+   795→   795→    });
+   796→   796→  },
+   797→   797→
+   798→   798→  claimBase: (areaId, locationId) => {
+   799→   799→    const state = get();
+   800→   800→    const area = state.areas[areaId];
+   801→   801→    if (!area || area.hasBase) return;
+   802→   802→    const loc = area.locations.find((l) => l.id === locationId);
+   803→   803→    if (!loc || !loc.cleared) return;
+   804→   804→
+   805→   805→    area.hasBase = true;
+   806→   806→    area.baseLocationId = locationId;
+   807→   807→    area.buildings = initialBuildings();
+   808→   808→    area.resourceCaps = calculateCaps(area);
+   809→   809→    area.resources = clampResources(area.resources, area.resourceCaps);
+   810→   810→
+   811→   811→    set({
+   812→   812→      areas: { ...state.areas },
+   813→   813→      log: [
+   814→   814→        ...state.log,
+   815→   815→        {
+   816→   816→          day: state.day,
+   817→   817→          message: `${area.name} is now your base! Shelter established.`,
+   818→   818→          type: "success",
+   819→   819→        },
+   820→   820→      ].slice(-100),
+   821→   821→    });
+   822→   822→  },
+   823→   823→
+   824→   824→  transferResources: (fromAreaId, toAreaId, resources) => {
+   825→   825→    const state = get();
+   826→   826→    const fromArea = state.areas[fromAreaId];
+   827→   827→    const toArea = state.areas[toAreaId];
+   828→   828→    if (!fromArea || !toArea) return;
+   829→   829→
+   830→   830→    // Check adjacency
+   831→   831→    const neighbors = getNeighborHexes(fromArea.hex);
+   832→   832→    const isNeighbor = neighbors.some(([q, r]) => q === toArea.hex[0] && r === toArea.hex[1]);
+   833→   833→    if (!isNeighbor) return;
+   834→   834→
+   835→   835→    // Validate resources
+   836→   836→    const validResources: Partial<Resources> = {};
+   837→   837→    for (const [k, v] of Object.entries(resources)) {
+   838→   838→      const amount = Math.min(fromArea.resources[k as ResourceType], v as number);
+   839→   839→      if (amount > 0) {
+   840→   840→        validResources[k as ResourceType] = amount;
+   841→   841→        fromArea.resources[k as ResourceType] -= amount;
+   842→   842→      }
+   843→   843→    }
+   844→   844→
+   845→   845→    if (Object.keys(validResources).length === 0) return;
+   846→   846→
+   847→   847→    const transfer: Transfer = {
+   848→   848→      id: `transfer_res_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+   849→   849→      fromAreaId,
+   850→   850→      toAreaId,
+   851→   851→      survivorIds: [],
+   852→   852→      resources: validResources,
+   853→   853→      arrivalDay: state.day + 1,
+   854→   854→    };
+   855→   855→
+   856→   856→    set({
+   857→   857→      areas: { ...state.areas },
+   858→   858→      transfers: [...state.transfers, transfer],
+   859→   859→      log: [
+   860→   860→        ...state.log,
+   861→   861→        {
+   862→   862→          day: state.day,
+   863→   863→          message: `Resources sent from ${fromArea.name} to ${toArea.name}.`,
+   864→   864→          type: "info",
+   865→   865→        },
+   866→   866→      ].slice(-100),
+   867→   867→    });
+   868→   868→  },
+   869→   869→
+   870→   870→  upgradeBuilding: (type) => {
+   871→   871→    const state = get();
+   872→   872→    const area = state.areas[state.currentAreaId];
+   873→   873→    if (!area || !area.hasBase) return;
+   874→   874→    const building = area.buildings[type];
+   875→   875→    if (building.level >= building.maxLevel) return;
+   876→   876→    const cost = getUpgradeCost(type, building.level, area.buildings.workshop.level);
+   877→   877→    if (!canAfford(area.resources, cost)) return;
+   878→   878→    const newResources = subtractCost(area.resources, cost);
+   879→   879→    area.buildings = {
+   880→   880→      ...area.buildings,
+   881→   881→      [type]: {
+   882→   882→        ...building,
+   883→   883→        level: building.level + 1,
+   884→   884→        maxHp: BUILDING_DEFS[type].baseHp + building.level * 20,
+   885→   885→        hp: building.hp + 20,
+   886→   886→      },
+   887→   887→    };
+   888→   888→    area.resources = clampResources(newResources, calculateCaps(area));
+   889→   889→    area.resourceCaps = calculateCaps(area);
+   890→   890→    set({
+   891→   891→      areas: { ...state.areas },
+   892→   892→      log: [
+   893→   893→        ...state.log,
+   894→   894→        {
+   895→   895→          day: state.day,
+   896→   896→          message: `[${area.name}] ${BUILDING_DEFS[type].label} upgraded to level ${building.level + 1}.`,
+   897→   897→          type: "success",
+   898→   898→        },
+   899→   899→      ].slice(-100),
+   900→   900→    });
+   901→   901→  },
+   902→   902→
+   903→   903→  repairBuilding: (type) => {
+   904→   904→    const state = get();
+   905→   905→    const area = state.areas[state.currentAreaId];
+   906→   906→    if (!area || !area.hasBase) return;
+   907→   907→    const building = area.buildings[type];
+   908→   908→    if (building.hp >= building.maxHp) return;
+   909→   909→    const repairCost = { materials: Math.ceil((building.maxHp - building.hp) / 5) };
+   910→   910→    if (!canAfford(area.resources, repairCost)) return;
+   911→   911→    area.resources = subtractCost(area.resources, repairCost);
+   912→   912→    area.buildings = {
+   913→   913→      ...area.buildings,
+   914→   914→      [type]: { ...building, hp: building.maxHp },
+   915→   915→    };
+   916→   916→    set({
+   917→   917→      areas: { ...state.areas },
+   918→   918→      log: [
+   919→   919→        ...state.log,
+   920→   920→        {
+   921→   921→          day: state.day,
+   922→   922→          message: `[${area.name}] ${BUILDING_DEFS[type].label} repaired.`,
+   923→   923→          type: "success",
+   924→   924→        },
+   925→   925→      ].slice(-100),
+   926→   926→    });
+   927→   927→  },
+   928→   928→
+   929→   929→  createTeam: (name) => {
+   930→   930→    const state = get();
+   931→   931→    const area = state.areas[state.currentAreaId];
+   932→   932→    if (!area || !area.hasBase) return null;
+   933→   933→    const maxTeams = Math.max(3, area.survivorIds.length);
+   934→   934→    if (area.teams.length >= maxTeams) return null;
+   935→   935→    const team: Team = {
+   936→   936→      id: `team_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+   937→   937→      name: name || `Team ${String.fromCharCode(65 + area.teams.length)}`,
+   938→   938→      memberIds: [],
+   939→   939→      locationId: null,
+   940→   940→    };
+   941→   941→    area.teams = [...area.teams, team];
+   942→   942→    set({ areas: { ...state.areas } });
+   943→   943→    return team.id;
+   944→   944→  },
+   945→   945→
+   946→   946→  deleteTeam: (teamId) => {
+   947→   947→    const state = get();
+   948→   948→    const area = state.areas[state.currentAreaId];
+   949→   949→    if (!area) return;
+   950→   950→    const team = area.teams.find((t) => t.id === teamId);
+   951→   951→    if (!team) return;
+   952→   952→    team.memberIds.forEach((id) => {
+   953→   953→      const s = state.survivors[id];
+   954→   954→      if (s) {
+   955→   955→        s.assignedTeamId = undefined;
+   956→   956→        s.role = "idle";
+   957→   957→      }
+   958→   958→    });
+   959→   959→    area.teams = area.teams.filter((t) => t.id !== teamId);
+   960→   960→    set({ areas: { ...state.areas } });
+   961→   961→  },
+   962→   962→
+   963→   963→  assignSurvivorToTeam: (survivorId, teamId) => {
+   964→   964→    const state = get();
+   965→   965→    const area = state.areas[state.currentAreaId];
+   966→   966→    if (!area) return;
+   967→   967→    const team = area.teams.find((t) => t.id === teamId);
+   968→   968→    if (!team) return;
+   969→   969→    const survivor = state.survivors[survivorId];
+   970→   970→    if (!survivor) return;
+   971→   971→    if (survivor.health < 30) return;
+   972→   972→    if (team.memberIds.includes(survivorId)) return;
+   973→   973→    const maxSize = getMaxTeamSize(area.buildings.barracks.level);
+   974→   974→    if (team.memberIds.length >= maxSize) return;
+   975→   975→
+   976→   976→    area.teams = area.teams.map((t) => ({
+   977→   977→      ...t,
+   978→   978→      memberIds: t.memberIds.filter((id) => id !== survivorId),
+   979→   979→    }));
+   980→   980→    const targetTeam = area.teams.find((t) => t.id === teamId);
+   981→   981→    if (targetTeam) targetTeam.memberIds.push(survivorId);
+   982→   982→    survivor.assignedTeamId = teamId;
+   983→   983→    survivor.role = "working";
+   984→   984→    set({ areas: { ...state.areas } });
+   985→   985→  },
+   986→   986→
+   987→   987→  unassignSurvivorFromTeam: (survivorId) => {
+   988→   988→    const state = get();
+   989→   989→    const area = state.areas[state.currentAreaId];
+   990→   990→    if (!area) return;
+   991→   991→    area.teams = area.teams.map((t) => ({
+   992→   992→      ...t,
+   993→   993→      memberIds: t.memberIds.filter((id) => id !== survivorId),
+   994→   994→    }));
+   995→   995→    const survivor = state.survivors[survivorId];
+   996→   996→    if (survivor) {
+   997→   997→      survivor.assignedTeamId = undefined;
+   998→   998→      survivor.role = "idle";
+   999→   999→    }
+  1000→  1000→    set({ areas: { ...state.areas } });
+  1001→  1001→  },
+  1002→  1002→
+  1003→  1003→  assignTeamToLocation: (teamId, locationId) => {
+  1004→  1004→    const state = get();
+  1005→  1005→    const area = state.areas[state.currentAreaId];
+  1006→  1006→    if (!area) return;
+  1007→  1007→    const team = area.teams.find((t) => t.id === teamId);
+  1008→  1008→    if (!team || team.memberIds.length === 0) return;
+  1009→  1009→    const location = area.locations.find((l) => l.id === locationId);
+  1010→  1010→    if (!location) return;
+  1011→  1011→    if (location.cleared) return; // use salvage for cleared
+  1012→  1012→
+  1013→  1013→    const teamHasPending = area.missions.some(
+  1014→  1014→      (m) => m.teamId === teamId && m.status === "pending"
+  1015→  1015→    );
+  1016→  1016→    if (teamHasPending) return;
+  1017→  1017→
+  1018→  1018→    const mission: Mission = {
+  1019→  1019→      id: `mission_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+  1020→  1020→      teamId,
+  1021→  1021→      team: [...team.memberIds],
+  1022→  1022→      locationId,
+  1023→  1023→      status: "pending",
+  1024→  1024→      missionType: "scout",
+  1025→  1025→    };
+  1026→  1026→    area.teams = area.teams.map((t) =>
+  1027→  1027→      t.id === teamId ? { ...t, locationId } : t
+  1028→  1028→    );
+  1029→  1029→    area.missions = [...area.missions, mission];
+  1030→  1030→    set({
+  1031→  1031→      areas: { ...state.areas },
+  1032→  1032→      log: [
+  1033→  1033→        ...state.log,
+  1034→  1034→        {
+  1035→  1035→          day: state.day,
+  1036→  1036→          message: `[${area.name}] Team "${team.name}" assigned to scout ${location.name}.`,
+  1037→  1037→          type: "info",
+  1038→  1038→        },
+  1039→  1039→      ].slice(-100),
+  1040→  1040→    });
+  1041→  1041→  },
+  1042→  1042→
+  1043→  1043→  assignTeamToSalvage: (teamId, locationId) => {
+  1044→  1044→    const state = get();
+  1045→  1045→    const area = state.areas[state.currentAreaId];
+  1046→  1046→    if (!area) return;
+  1047→  1047→    const team = area.teams.find((t) => t.id === teamId);
+  1048→  1048→    if (!team || team.memberIds.length === 0) return;
+  1049→  1049→    const location = area.locations.find((l) => l.id === locationId);
+  1050→  1050→    if (!location || !location.cleared || location.salvageDepleted) return;
+  1051→  1051→
+  1052→  1052→    const teamHasPending = area.missions.some(
+  1053→  1053→      (m) => m.teamId === teamId && m.status === "pending"
+  1054→  1054→    );
+  1055→  1055→    if (teamHasPending) return;
+  1056→  1056→
+  1057→  1057→    const mission: Mission = {
+  1058→  1058→      id: `salvage_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+  1059→  1059→      teamId,
+  1060→  1060→      team: [...team.memberIds],
+  1061→  1061→      locationId,
+  1062→  1062→      status: "pending",
+  1063→  1063→      missionType: "salvage",
+  1064→  1064→    };
+  1065→  1065→    area.teams = area.teams.map((t) =>
+  1066→  1066→      t.id === teamId ? { ...t, locationId } : t
+  1067→  1067→    );
+  1068→  1068→    area.missions = [...area.missions, mission];
+  1069→  1069→    set({
+  1070→  1070→      areas: { ...state.areas },
+  1071→  1071→      log: [
+  1072→  1072→        ...state.log,
+  1073→  1073→        {
+  1074→  1074→          day: state.day,
+  1075→  1075→          message: `[${area.name}] Team "${team.name}" assigned to salvage ${location.name}.`,
+  1076→  1076→          type: "info",
+  1077→  1077→        },
+  1078→  1078→      ].slice(-100),
+  1079→  1079→    });
+  1080→  1080→  },
+  1081→  1081→
+  1082→  1082→  clearTeamLocation: (teamId) => {
+  1083→  1083→    const state = get();
+  1084→  1084→    const area = state.areas[state.currentAreaId];
+  1085→  1085→    if (!area) return;
+  1086→  1086→    const team = area.teams.find((t) => t.id === teamId);
+  1087→  1087→    if (!team || !team.locationId) return;
+  1088→  1088→    area.missions = area.missions.filter(
+  1089→  1089→      (m) => !(m.teamId === teamId && m.status === "pending")
+  1090→  1090→    );
+  1091→  1091→    area.teams = area.teams.map((t) =>
+  1092→  1092→      t.id === teamId ? { ...t, locationId: null } : t
+  1093→  1093→    );
+  1094→  1094→    set({ areas: { ...state.areas } });
+  1095→  1095→  },
+  1096→  1096→
+  1097→  1097→  setSurvivorResting: (survivorId, resting) => {
+  1098→  1098→    const state = get();
+  1099→  1099→    const area = state.areas[state.currentAreaId];
+  1100→  1100→    if (!area) return;
+  1101→  1101→    const survivor = state.survivors[survivorId];
+  1102→  1102→    if (!survivor) return;
+  1103→  1103→    survivor.role = resting ? "resting" : "idle";
+  1104→  1104→    survivor.assignedTeamId = undefined;
+  1105→  1105→    area.teams = area.teams.map((t) => ({
+  1106→  1106→      ...t,
+  1107→  1107→      memberIds: t.memberIds.filter((id) => id !== survivorId),
+  1108→  1108→    }));
+  1109→  1109→    set({ areas: { ...state.areas } });
+  1110→  1110→  },
+  1111→  1111→
+  1112→  1112→  autoAssignSurvivors: () => {
+  1113→  1113→    const state = get();
+  1114→  1114→    const area = state.areas[state.currentAreaId];
+  1115→  1115→    if (!area || !area.hasBase) return;
+  1116→  1116→    const available = area.survivorIds
+  1117→  1117→      .map((id) => state.survivors[id])
+  1118→  1118→      .filter((s) => s && (s.role === "idle" || s.role === "resting"));
+  1119→  1119→    if (available.length === 0) return;
+  1120→  1120→
+  1121→  1121→    let teams = [...area.teams].sort((a, b) => a.memberIds.length - b.memberIds.length);
+  1122→  1122→    const maxSize = getMaxTeamSize(area.buildings.barracks.level);
+  1123→  1123→
+  1124→  1124→    for (const survivor of available) {
+  1125→  1125→      let target = teams.find((t) => t.memberIds.length < maxSize);
+  1126→  1126→      if (!target) {
+  1127→  1127→        const maxTeamsCount = Math.max(3, area.survivorIds.length);
+  1128→  1128→        if (teams.length >= maxTeamsCount) break;
+  1129→  1129→        const newName = `Team ${String.fromCharCode(65 + teams.length)}`;
+  1130→  1130→        const newId = get().createTeam(newName);
+  1131→  1131→        if (!newId) break;
+  1132→  1132→        const updated = get().areas[area.id].teams;
+  1133→  1133→        target = updated.find((t) => t.id === newId);
+  1134→  1134→        if (!target) break;
+  1135→  1135→        teams = [...updated].sort((a, b) => a.memberIds.length - b.memberIds.length);
+  1136→  1136→      }
+  1137→  1137→      get().assignSurvivorToTeam(survivor.id, target.id);
+  1138→  1138→      teams = [...get().areas[area.id].teams].sort(
+  1139→  1139→        (a, b) => a.memberIds.length - b.memberIds.length
+  1140→  1140→      );
+  1141→  1141→    }
+  1142→  1142→  },
+  1143→  1143→
+  1144→  1144→  endDay: () => {
+  1145→  1145→    set((state) => {
+  1146→  1146→      const newLog: GameLogEntry[] = [...state.log];
+  1147→  1147→      const day = state.day;
+  1148→  1148→      const allSurvivors = { ...state.survivors };
+  1149→  1149→
+  1150→  1150→      newLog.push({ day, message: `=== Day ${day} ===`, type: "info" });
+  1151→  1151→
+  1152→  1152→      // Process transfers (arrivals)
+  1153→  1153→      const remainingTransfers = processTransfers(state, day, newLog);
+  1154→  1154→
+  1155→  1155→      // Process each discovered area
+  1156→  1156→      const allDied: string[] = [];
+  1157→  1157→      for (const area of Object.values(state.areas)) {
+  1158→  1158→        if (!area.discovered) continue;
+  1159→  1159→        const { survivorsDied } = processArea(area, allSurvivors, day, newLog);
+  1160→  1160→        allDied.push(...survivorsDied);
+  1161→  1161→      }
+  1162→  1162→
+  1163→  1163→      // Remove dead survivors from global record
+  1164→  1164→      for (const id of allDied) {
+  1165→  1165→        delete allSurvivors[id];
+  1166→  1166→      }
+  1167→  1167→
+  1168→  1168→      // Check game over
+  1169→  1169→      let gameOver = false;
+  1170→  1170→      let gameOverReason: string | undefined;
+  1171→  1171→      const allSurvivorIds = Object.keys(allSurvivors);
+  1172→  1172→      if (allSurvivorIds.length === 0) {
+  1173→  1173→        gameOver = true;
+  1174→  1174→        gameOverReason = "All your survivors are dead. The wasteland claims another.";
+  1175→  1175→      }
+  1176→  1176→
+  1177→  1177→      const nextDay = day + 1;
+  1178→  1178→      newLog.push({ day: nextDay, message: `=== Day ${nextDay} ===`, type: "info" });
+  1179→  1179→
+  1180→  1180→      return {
+  1181→  1181→        ...state,
+  1182→  1182→        day: nextDay,
+  1183→  1183→        areas: { ...state.areas },
+  1184→  1184→        survivors: allSurvivors,
+  1185→  1185→        transfers: remainingTransfers,
+  1186→  1186→        log: newLog.slice(-120),
+  1187→  1187→        gameOver,
+  1188→  1188→        gameOverReason,
+  1189→  1189→      };
+  1190→  1190→    });
+  1191→  1191→  },
+  1192→  1192→}));
+  1193→  1193→
+  1194→  1194→// ---------- Selectors ----------
+  1195→  1195→export function selectSurvivorCapacity(area: Area | undefined): number {
+  1196→  1196→  if (!area || !area.hasBase) return 99;
+  1197→  1197→  return getSurvivorCapacity(area.buildings.shelter.level);
+  1198→  1198→}
+  1199→  1199→

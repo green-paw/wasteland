@@ -116,16 +116,64 @@ export interface Team {
   locationId: string | null;
 }
 
+// ============== Areas (hex-grid world map) ==============
+
+export type AreaType =
+  | "farm"
+  | "village"
+  | "town"
+  | "city"
+  | "military"
+  | "industrial"
+  | "wilderness"
+  | "ruins";
+
+export interface Area {
+  id: string;
+  name: string;
+  type: AreaType;
+  // Axial hex coordinates [q, r]
+  hex: [number, number];
+  // false = only type+name known (fog of war); true = locations generated & visible
+  discovered: boolean;
+  // Whether the player has established a base here (claimed a building)
+  hasBase: boolean;
+  // The cleared location acting as this area's base (if any)
+  baseLocationId?: string;
+  // Per-area state (only meaningful once discovered, but always present)
+  locations: GameLocation[];
+  buildings: Record<BuildingType, Building>;
+  resources: Resources;
+  resourceCaps: Resources;
+  teams: Team[];
+  missions: Mission[];
+  // Survivor IDs currently physically in this area
+  survivorIds: string[];
+}
+
+// A transfer moves survivors and/or resources between two adjacent areas.
+// It takes 1 day; while in transit the survivors can't act.
+export interface Transfer {
+  id: string;
+  fromAreaId: string;
+  toAreaId: string;
+  survivorIds: string[];
+  resources: Partial<Resources>;
+  // Day on which the transfer arrives and is applied
+  arrivalDay: number;
+}
+
 export interface GameState {
   day: number;
   started: boolean;
-  resources: Resources;
-  resourceCaps: Resources;
-  buildings: Record<BuildingType, Building>;
-  survivors: Survivor[];
-  locations: GameLocation[];
-  missions: Mission[];
-  teams: Team[];
+  // All areas indexed by id (hex grid). Undiscovered ones only have type/name.
+  areas: Record<string, Area>;
+  // The area the player is currently viewing in the Area Map / Base tabs.
+  currentAreaId: string;
+  // All survivors, indexed by id (so they can move between areas without dup).
+  survivors: Record<string, Survivor>;
+  // In-transit transfers between areas
+  transfers: Transfer[];
   log: GameLogEntry[];
   gameOver: boolean;
   gameOverReason?: string;

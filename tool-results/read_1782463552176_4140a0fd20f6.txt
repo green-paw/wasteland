@@ -1,0 +1,1426 @@
+     1→"use client";
+     2→
+     3→import { Canvas, useFrame } from "@react-three/fiber";
+     4→import { MapControls, Line, Html } from "@react-three/drei";
+     5→import { useMemo, useRef, useState, useEffect } from "react";
+     6→import * as THREE from "three";
+     7→import { useGameStore } from "@/game/store";
+     8→import { LOCATION_DEFS, ENEMY_INFO, RESOURCE_INFO } from "@/game/data";
+     9→import { GameLocation, LocationType } from "@/game/types";
+    10→import { Card } from "@/components/ui/card";
+    11→import { Button } from "@/components/ui/button";
+    12→import { Badge } from "@/components/ui/badge";
+    13→import { ScrollArea } from "@/components/ui/scroll-area";
+    14→import { Progress } from "@/components/ui/progress";
+    15→import {
+    16→  MapPin,
+    17→  Crosshair,
+    18→  Users,
+    19→  Skull,
+    20→  Package,
+    21→  X,
+    22→  Flag,
+    23→  Target,
+    24→  Trash2,
+    25→  Hammer,
+    26→  Pickaxe,
+    27→} from "lucide-react";
+    28→
+    29→// ---------- Helper: window ----------
+    30→function Window({
+    31→  position,
+    32→  rotation = [0, 0, 0],
+    33→  size = [0.3, 0.4],
+    34→  color = "#5a7a8a",
+    35→}: {
+    36→  position: [number, number, number];
+    37→  rotation?: [number, number, number];
+    38→  size?: [number, number];
+    39→  color?: string;
+    40→}) {
+    41→  return (
+    42→    <mesh position={position} rotation={rotation}>
+    43→      <planeGeometry args={size} />
+    44→      <meshStandardMaterial
+    45→        color={color}
+    46→        emissive="#1a2a3a"
+    47→        emissiveIntensity={0.3}
+    48→        side={THREE.DoubleSide}
+    49→      />
+    50→    </mesh>
+    51→  );
+    52→}
+    53→
+    54→// ---------- Helper: door ----------
+    55→function Door({
+    56→  position,
+    57→  rotation = [0, 0, 0],
+    58→  size = [0.5, 0.9],
+    59→  color = "#2a1a0a",
+    60→}: {
+    61→  position: [number, number, number];
+    62→  rotation?: [number, number, number];
+    63→  size?: [number, number];
+    64→  color?: string;
+    65→}) {
+    66→  return (
+    67→    <mesh position={position} rotation={rotation}>
+    68→      <planeGeometry args={size} />
+    69→      <meshStandardMaterial color={color} side={THREE.DoubleSide} />
+    70→    </mesh>
+    71→  );
+    72→}
+    73→
+    74→// ---------- Low-poly terrain ----------
+    75→function Terrain() {
+    76→  const geometry = useMemo(() => {
+    77→    const geo = new THREE.PlaneGeometry(80, 80, 40, 40);
+    78→    // subtle height variation
+    79→    const pos = geo.attributes.position;
+    80→    for (let i = 0; i < pos.count; i++) {
+    81→      const x = pos.getX(i);
+    82→      const y = pos.getY(i);
+    83→      const dist = Math.sqrt(x * x + y * y);
+    84→      const noise = Math.sin(x * 0.3) * Math.cos(y * 0.3) * 0.3;
+    85→      pos.setZ(i, noise + Math.sin(dist * 0.2) * 0.2);
+    86→    }
+    87→    geo.computeVertexNormals();
+    88→    return geo;
+    89→  }, []);
+    90→
+    91→  return (
+    92→    <mesh
+    93→      geometry={geometry}
+    94→      rotation={[-Math.PI / 2, 0, 0]}
+    95→      position={[0, -0.1, 0]}
+    96→      receiveShadow
+    97→    >
+    98→      <meshStandardMaterial color="#3a4a2a" flatShading roughness={1} />
+    99→    </mesh>
+   100→  );
+   101→}
+   102→
+   103→// ---------- Low-poly base buildings (more detailed) ----------
+   104→function BaseBuildings() {
+   105→  return (
+   106→    <group position={[0, 0, 0]}>
+   107→      {/* Main shelter — main body */}
+   108→      <mesh position={[0, 0.8, 0]} castShadow>
+   109→        <boxGeometry args={[2.4, 1.6, 2]} />
+   110→        <meshStandardMaterial color="#6b5a3a" flatShading roughness={0.9} />
+   111→      </mesh>
+   112→      {/* Roof — pyramid shape */}
+   113→      <mesh position={[0, 1.85, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+   114→        <coneGeometry args={[1.9, 0.9, 4]} />
+   115→        <meshStandardMaterial color="#3a2a1a" flatShading roughness={1} />
+   116→      </mesh>
+   117→      {/* Chimney */}
+   118→      <mesh position={[0.6, 2.2, -0.3]} castShadow>
+   119→        <boxGeometry args={[0.3, 0.5, 0.3]} />
+   120→        <meshStandardMaterial color="#4a3a2a" flatShading />
+   121→      </mesh>
+   122→      {/* Door */}
+   123→      <Door position={[0, 0.45, 1.01]} size={[0.6, 0.9]} color="#2a1a0a" />
+   124→      {/* Door handle */}
+   125→      <mesh position={[0.2, 0.45, 1.02]}>
+   126→        <sphereGeometry args={[0.04, 6, 6]} />
+   127→        <meshStandardMaterial color="#aa8833" metalness={0.7} roughness={0.3} />
+   128→      </mesh>
+   129→      {/* Front windows */}
+   130→      <Window position={[-0.7, 0.9, 1.01]} size={[0.4, 0.4]} />
+   131→      <Window position={[0.7, 0.9, 1.01]} size={[0.4, 0.4]} />
+   132→      {/* Side windows */}
+   133→      <Window position={[1.21, 0.9, 0]} rotation={[0, Math.PI / 2, 0]} size={[0.4, 0.4]} />
+   134→      <Window position={[-1.21, 0.9, 0]} rotation={[0, Math.PI / 2, 0]} size={[0.4, 0.4]} />
+   135→
+   136→      {/* Watchtower — 4 legs */}
+   137→      <mesh position={[2.3, 1, -1.5]} castShadow>
+   138→        <cylinderGeometry args={[0.12, 0.14, 2, 6]} />
+   139→        <meshStandardMaterial color="#4a3a2a" flatShading />
+   140→      </mesh>
+   141→      <mesh position={[1.7, 1, -1.5]} castShadow>
+   142→        <cylinderGeometry args={[0.12, 0.14, 2, 6]} />
+   143→        <meshStandardMaterial color="#4a3a2a" flatShading />
+   144→      </mesh>
+   145→      <mesh position={[2.3, 1, -0.9]} castShadow>
+   146→        <cylinderGeometry args={[0.12, 0.14, 2, 6]} />
+   147→        <meshStandardMaterial color="#4a3a2a" flatShading />
+   148→      </mesh>
+   149→      <mesh position={[1.7, 1, -0.9]} castShadow>
+   150→        <cylinderGeometry args={[0.12, 0.14, 2, 6]} />
+   151→        <meshStandardMaterial color="#4a3a2a" flatShading />
+   152→      </mesh>
+   153→      {/* Watchtower platform */}
+   154→      <mesh position={[2, 2.2, -1.2]} castShadow>
+   155→        <boxGeometry args={[1, 0.2, 1]} />
+   156→        <meshStandardMaterial color="#5a4a3a" flatShading />
+   157→      </mesh>
+   158→      {/* Watchtower roof */}
+   159→      <mesh position={[2, 2.9, -1.2]} rotation={[0, Math.PI / 4, 0]} castShadow>
+   160→        <coneGeometry args={[0.8, 0.6, 4]} />
+   161→        <meshStandardMaterial color="#3a2a1a" flatShading />
+   162→      </mesh>
+   163→
+   164→      {/* Farm plot — rows of crops */}
+   165→      <mesh position={[-2, 0.05, 1.5]} rotation={[-Math.PI / 2, 0, 0]}>
+   166→        <planeGeometry args={[1.8, 1.8]} />
+   167→        <meshStandardMaterial color="#4a3a1a" flatShading />
+   168→      </mesh>
+   169→      {[0, 1, 2, 3].map((i) => (
+   170→        <mesh key={i} position={[-2.6 + i * 0.4, 0.1, 1.5]} castShadow>
+   171→          <boxGeometry args={[0.1, 0.15, 1.4]} />
+   172→          <meshStandardMaterial color="#5a8a2a" flatShading />
+   173→        </mesh>
+   174→      ))}
+   175→
+   176→      {/* Storage crates */}
+   177→      <mesh position={[-2, 0.4, -1.5]} castShadow>
+   178→        <boxGeometry args={[0.8, 0.8, 0.8]} />
+   179→        <meshStandardMaterial color="#6a5a3a" flatShading />
+   180→      </mesh>
+   181→      <mesh position={[-1.4, 0.3, -1.7]} castShadow>
+   182→        <boxGeometry args={[0.6, 0.6, 0.6]} />
+   183→        <meshStandardMaterial color="#5a4a2a" flatShading />
+   184→      </mesh>
+   185→
+   186→      {/* Flag pole + flag */}
+   187→      <mesh position={[0, 2.5, 0]}>
+   188→        <cylinderGeometry args={[0.04, 0.04, 1.4, 6]} />
+   189→        <meshStandardMaterial color="#2a2a2a" />
+   190→      </mesh>
+   191→      <mesh position={[0.25, 3, 0]}>
+   192→        <planeGeometry args={[0.5, 0.3]} />
+   193→        <meshStandardMaterial color="#a83a3a" side={THREE.DoubleSide} />
+   194→      </mesh>
+   195→
+   196→      {/* Sandbags around perimeter */}
+   197→      {[
+   198→        [1.5, 0.2, 1.2],
+   199→        [1.8, 0.2, 1.0],
+   200→        [-1.5, 0.2, -1.2],
+   201→        [-1.8, 0.2, -1.0],
+   202→        [1.5, 0.2, -1.2],
+   203→        [-1.5, 0.2, 1.2],
+   204→      ].map((pos, i) => (
+   205→        <mesh key={i} position={pos as [number, number, number]} castShadow>
+   206→          <boxGeometry args={[0.35, 0.25, 0.25]} />
+   207→          <meshStandardMaterial color="#8a7a5a" flatShading />
+   208→        </mesh>
+   209→      ))}
+   210→    </group>
+   211→  );
+   212→}
+   213→
+   214→// ---------- Location building models (detailed) ----------
+   215→function LocationBuilding({ type }: { type: LocationType }) {
+   216→  const color = LOCATION_DEFS[type].color;
+   217→  switch (type) {
+   218→    case "abandoned_house":
+   219→      return (
+   220→        <group>
+   221→          {/* Main body */}
+   222→          <mesh position={[0, 0.6, 0]} castShadow>
+   223→            <boxGeometry args={[1.2, 1.2, 1.2]} />
+   224→            <meshStandardMaterial color={color} flatShading roughness={1} />
+   225→          </mesh>
+   226→          {/* Roof — pyramid */}
+   227→          <mesh position={[0, 1.5, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+   228→            <coneGeometry args={[1, 0.7, 4]} />
+   229→            <meshStandardMaterial color="#3a2a1a" flatShading />
+   230→          </mesh>
+   231→          {/* Door */}
+   232→          <Door position={[0, 0.35, 0.61]} size={[0.4, 0.7]} color="#1a0a00" />
+   233→          {/* Windows (broken/dark) */}
+   234→          <Window position={[-0.35, 0.8, 0.61]} size={[0.3, 0.3]} color="#1a1a1a" />
+   235→          <Window position={[0.35, 0.8, 0.61]} size={[0.3, 0.3]} color="#1a1a1a" />
+   236→          {/* Side window */}
+   237→          <Window position={[0.61, 0.8, 0]} rotation={[0, Math.PI / 2, 0]} size={[0.3, 0.3]} color="#1a1a1a" />
+   238→          {/* Collapsed porch / debris */}
+   239→          <mesh position={[0, 0.1, 0.9]} castShadow>
+   240→            <boxGeometry args={[0.8, 0.2, 0.4]} />
+   241→            <meshStandardMaterial color="#4a3a2a" flatShading />
+   242→          </mesh>
+   243→        </group>
+   244→      );
+   245→    case "supermarket":
+   246→      return (
+   247→        <group>
+   248→          {/* Main body */}
+   249→          <mesh position={[0, 0.75, 0]} castShadow>
+   250→            <boxGeometry args={[2, 1.5, 1.5]} />
+   251→            <meshStandardMaterial color={color} flatShading />
+   252→          </mesh>
+   253→          {/* Flat roof */}
+   254→          <mesh position={[0, 1.55, 0]} castShadow>
+   255→            <boxGeometry args={[2.1, 0.1, 1.6]} />
+   256→            <meshStandardMaterial color="#2a2a2a" flatShading />
+   257→          </mesh>
+   258→          {/* Roof AC unit */}
+   259→          <mesh position={[0.5, 1.7, 0]} castShadow>
+   260→            <boxGeometry args={[0.5, 0.25, 0.5]} />
+   261→            <meshStandardMaterial color="#4a4a4a" flatShading />
+   262→          </mesh>
+   263→          {/* Entrance doors (double) */}
+   264→          <Door position={[-0.25, 0.45, 0.76]} size={[0.35, 0.9]} color="#1a1a1a" />
+   265→          <Door position={[0.25, 0.45, 0.76]} size={[0.35, 0.9]} color="#1a1a1a" />
+   266→          {/* Storefront windows (wide) */}
+   267→          <Window position={[-0.8, 0.8, 0.76]} size={[0.4, 0.6]} color="#2a3a4a" />
+   268→          <Window position={[0.8, 0.8, 0.76]} size={[0.4, 0.6]} color="#2a3a4a" />
+   269→          {/* Sign */}
+   270→          <mesh position={[0, 1.3, 0.76]}>
+   271→            <boxGeometry args={[1.5, 0.25, 0.05]} />
+   272→            <meshStandardMaterial color="#aa3333" />
+   273→          </mesh>
+   274→          {/* Shopping cart */}
+   275→          <mesh position={[1.3, 0.3, 0.8]} castShadow>
+   276→            <boxGeometry args={[0.3, 0.4, 0.4]} />
+   277→            <meshStandardMaterial color="#5a5a5a" wireframe />
+   278→          </mesh>
+   279→        </group>
+   280→      );
+   281→    case "hospital":
+   282→      return (
+   283→        <group>
+   284→          {/* Main tower */}
+   285→          <mesh position={[0, 1.2, 0]} castShadow>
+   286→            <boxGeometry args={[1.5, 2.4, 1.5]} />
+   287→            <meshStandardMaterial color={color} flatShading />
+   288→          </mesh>
+   289→          {/* Flat roof */}
+   290→          <mesh position={[0, 2.45, 0]} castShadow>
+   291→            <boxGeometry args={[1.6, 0.1, 1.6]} />
+   292→            <meshStandardMaterial color="#3a3a3a" flatShading />
+   293→          </mesh>
+   294→          {/* Red cross sign */}
+   295→          <mesh position={[0, 1.8, 0.76]}>
+   296→            <boxGeometry args={[0.7, 0.2, 0.05]} />
+   297→            <meshStandardMaterial color="#cc3333" emissive="#cc3333" emissiveIntensity={0.3} />
+   298→          </mesh>
+   299→          <mesh position={[0, 1.8, 0.76]}>
+   300→            <boxGeometry args={[0.2, 0.7, 0.05]} />
+   301→            <meshStandardMaterial color="#cc3333" emissive="#cc3333" emissiveIntensity={0.3} />
+   302→          </mesh>
+   303→          {/* Entrance (double doors) */}
+   304→          <Door position={[-0.25, 0.5, 0.76]} size={[0.35, 1]} color="#2a4a5a" />
+   305→          <Door position={[0.25, 0.5, 0.76]} size={[0.35, 1]} color="#2a4a5a" />
+   306→          {/* Row of windows floor 1 */}
+   307→          <Window position={[-0.5, 1.2, 0.76]} size={[0.3, 0.4]} color="#6a8a9a" />
+   308→          <Window position={[0.5, 1.2, 0.76]} size={[0.3, 0.4]} color="#6a8a9a" />
+   309→          {/* Row of windows floor 2 */}
+   310→          <Window position={[-0.5, 2, 0.76]} size={[0.3, 0.4]} color="#6a8a9a" />
+   311→          <Window position={[0.5, 2, 0.76]} size={[0.3, 0.4]} color="#6a8a9a" />
+   312→          {/* Ambulance */}
+   313→          <mesh position={[1.3, 0.4, 0.5]} castShadow>
+   314→            <boxGeometry args={[0.7, 0.6, 1.2]} />
+   315→            <meshStandardMaterial color="#eeeeee" flatShading />
+   316→          </mesh>
+   317→          <mesh position={[1.3, 0.7, 0.5]}>
+   318→            <boxGeometry args={[0.6, 0.3, 0.8]} />
+   319→            <meshStandardMaterial color="#cc3333" flatShading />
+   320→          </mesh>
+   321→        </group>
+   322→      );
+   323→    case "gas_station":
+   324→      return (
+   325→        <group>
+   326→          {/* Convenience store */}
+   327→          <mesh position={[0, 0.5, 0]} castShadow>
+   328→            <boxGeometry args={[1.4, 1, 1]} />
+   329→            <meshStandardMaterial color={color} flatShading />
+   330→          </mesh>
+   331→          {/* Flat roof */}
+   332→          <mesh position={[0, 1.05, 0]} castShadow>
+   333→            <boxGeometry args={[1.5, 0.1, 1.1]} />
+   334→            <meshStandardMaterial color="#3a3a3a" flatShading />
+   335→          </mesh>
+   336→          {/* Door */}
+   337→          <Door position={[0, 0.35, 0.51]} size={[0.4, 0.7]} color="#1a1a1a" />
+   338→          {/* Window */}
+   339→          <Window position={[-0.4, 0.5, 0.51]} size={[0.4, 0.4]} color="#3a4a5a" />
+   340→          {/* Canopy over pumps */}
+   341→          <mesh position={[1.3, 1.4, 0]} castShadow>
+   342→            <boxGeometry args={[1.6, 0.15, 1.6]} />
+   343→            <meshStandardMaterial color="#5a5a5a" flatShading />
+   344→          </mesh>
+   345→          {/* Canopy supports */}
+   346→          <mesh position={[0.7, 0.7, -0.6]} castShadow>
+   347→            <cylinderGeometry args={[0.08, 0.08, 1.4, 6]} />
+   348→            <meshStandardMaterial color="#3a3a3a" />
+   349→          </mesh>
+   350→          <mesh position={[1.9, 0.7, -0.6]} castShadow>
+   351→            <cylinderGeometry args={[0.08, 0.08, 1.4, 6]} />
+   352→            <meshStandardMaterial color="#3a3a3a" />
+   353→          </mesh>
+   354→          <mesh position={[0.7, 0.7, 0.6]} castShadow>
+   355→            <cylinderGeometry args={[0.08, 0.08, 1.4, 6]} />
+   356→            <meshStandardMaterial color="#3a3a3a" />
+   357→          </mesh>
+   358→          <mesh position={[1.9, 0.7, 0.6]} castShadow>
+   359→            <cylinderGeometry args={[0.08, 0.08, 1.4, 6]} />
+   360→            <meshStandardMaterial color="#3a3a3a" />
+   361→          </mesh>
+   362→          {/* Gas pumps */}
+   363→          <mesh position={[1.3, 0.5, 0]} castShadow>
+   364→            <boxGeometry args={[0.25, 0.8, 0.5]} />
+   365→            <meshStandardMaterial color="#3a4a5a" flatShading />
+   366→          </mesh>
+   367→          <mesh position={[1.3, 0.9, 0.15]}>
+   368→            <boxGeometry args={[0.2, 0.15, 0.2]} />
+   369→            <meshStandardMaterial color="#2a3a4a" />
+   370→          </mesh>
+   371→        </group>
+   372→      );
+   373→    case "warehouse":
+   374→      return (
+   375→        <group>
+   376→          {/* Main body */}
+   377→          <mesh position={[0, 0.75, 0]} castShadow>
+   378→            <boxGeometry args={[2.2, 1.5, 1.6]} />
+   379→            <meshStandardMaterial color={color} flatShading />
+   380→          </mesh>
+   381→          {/* Curved roof — half cylinder */}
+   382→          <mesh position={[0, 1.7, 0]} rotation={[0, 0, 0]} castShadow>
+   383→            <cylinderGeometry args={[0.85, 0.85, 2.2, 8, 1, false, 0, Math.PI]} />
+   384→            <meshStandardMaterial color="#2a2a2a" flatShading side={THREE.DoubleSide} />
+   385→          </mesh>
+   386→          {/* Loading dock door (large) */}
+   387→          <mesh position={[0, 0.6, 0.81]}>
+   388→            <boxGeometry args={[1.2, 1.1, 0.05]} />
+   389→            <meshStandardMaterial color="#3a3a3a" flatShading />
+   390→          </mesh>
+   391→          {/* Door lines (rolled up) */}
+   392→          {[0, 1, 2, 3, 4].map((i) => (
+   393→            <mesh key={i} position={[0, 0.2 + i * 0.2, 0.82]}>
+   394→              <boxGeometry args={[1.2, 0.03, 0.02]} />
+   395→              <meshStandardMaterial color="#1a1a1a" />
+   396→            </mesh>
+   397→          ))}
+   398→          {/* Small office window */}
+   399→          <Window position={[-0.8, 1, 0.81]} size={[0.3, 0.3]} color="#2a3a4a" />
+   400→          {/* Pallets */}
+   401→          <mesh position={[1.2, 0.15, 0.5]} castShadow>
+   402→            <boxGeometry args={[0.5, 0.15, 0.5]} />
+   403→            <meshStandardMaterial color="#5a4a2a" flatShading />
+   404→          </mesh>
+   405→          <mesh position={[1.2, 0.4, 0.5]} castShadow>
+   406→            <boxGeometry args={[0.4, 0.3, 0.4]} />
+   407→            <meshStandardMaterial color="#6a5a3a" flatShading />
+   408→          </mesh>
+   409→        </group>
+   410→      );
+   411→    case "military_base":
+   412→      return (
+   413→        <group>
+   414→          {/* Bunker main body */}
+   415→          <mesh position={[0, 0.5, 0]} castShadow>
+   416→            <boxGeometry args={[2, 1, 1.5]} />
+   417→            <meshStandardMaterial color={color} flatShading />
+   418→          </mesh>
+   419→          {/* Sandbag wall in front */}
+   420→          {[-0.8, -0.4, 0, 0.4, 0.8].map((x, i) => (
+   421→            <mesh key={i} position={[x, 0.2, 0.9]} castShadow>
+   422→              <boxGeometry args={[0.35, 0.3, 0.25]} />
+   423→              <meshStandardMaterial color="#8a7a5a" flatShading />
+   424→            </mesh>
+   425→          ))}
+   426→          {[-0.6, -0.2, 0.2, 0.6].map((x, i) => (
+   427→            <mesh key={`s${i}`} position={[x, 0.45, 0.9]} castShadow>
+   428→              <boxGeometry args={[0.35, 0.3, 0.25]} />
+   429→              <meshStandardMaterial color="#7a6a4a" flatShading />
+   430→            </mesh>
+   431→          ))}
+   432→          {/* Radio antenna tower */}
+   433→          <mesh position={[-1, 1.3, -0.4]} castShadow>
+   434→            <cylinderGeometry args={[0.06, 0.08, 1.8, 6]} />
+   435→            <meshStandardMaterial color="#3a3a3a" />
+   436→          </mesh>
+   437→          <mesh position={[-1, 2, -0.4]}>
+   438→            <boxGeometry args={[0.4, 0.05, 0.05]} />
+   439→            <meshStandardMaterial color="#2a2a2a" />
+   440→          </mesh>
+   441→          <mesh position={[-1, 2.2, -0.4]}>
+   442→            <sphereGeometry args={[0.08, 6, 6]} />
+   443→            <meshStandardMaterial color="#aa3333" emissive="#aa3333" emissiveIntensity={0.5} />
+   444→          </mesh>
+   445→          {/* Sandbag bunker (small) */}
+   446→          <mesh position={[0.9, 0.4, 0]} castShadow>
+   447→            <cylinderGeometry args={[0.5, 0.6, 0.7, 8]} />
+   448→            <meshStandardMaterial color="#6a5a3a" flatShading />
+   449→          </mesh>
+   450→          {/* Door */}
+   451→          <Door position={[0, 0.4, 0.76]} size={[0.5, 0.8]} color="#2a3a1a" />
+   452→          {/* Ammo crate */}
+   453→          <mesh position={[0.7, 0.2, 0.7]} castShadow>
+   454→            <boxGeometry args={[0.4, 0.3, 0.4]} />
+   455→            <meshStandardMaterial color="#4a5a3a" flatShading />
+   456→          </mesh>
+   457→        </group>
+   458→      );
+   459→    case "school":
+   460→      return (
+   461→        <group>
+   462→          {/* Main body */}
+   463→          <mesh position={[0, 0.75, 0]} castShadow>
+   464→            <boxGeometry args={[2.2, 1.5, 1.4]} />
+   465→            <meshStandardMaterial color={color} flatShading />
+   466→          </mesh>
+   467→          {/* Flat roof */}
+   468→          <mesh position={[0, 1.55, 0]} castShadow>
+   469→            <boxGeometry args={[2.3, 0.15, 1.5]} />
+   470→            <meshStandardMaterial color="#3a2a1a" flatShading />
+   471→          </mesh>
+   472→          {/* Front entrance — steps */}
+   473→          <mesh position={[0, 0.1, 0.8]} castShadow>
+   474→            <boxGeometry args={[1.2, 0.2, 0.3]} />
+   475→            <meshStandardMaterial color="#5a5a5a" flatShading />
+   476→          </mesh>
+   477→          <mesh position={[0, 0.25, 0.95]} castShadow>
+   478→            <boxGeometry args={[1, 0.15, 0.2]} />
+   479→            <meshStandardMaterial color="#4a4a4a" flatShading />
+   480→          </mesh>
+   481→          {/* Double doors */}
+   482→          <Door position={[-0.2, 0.55, 0.71]} size={[0.3, 0.9]} color="#2a1a0a" />
+   483→          <Door position={[0.2, 0.55, 0.71]} size={[0.3, 0.9]} color="#2a1a0a" />
+   484→          {/* Row of windows */}
+   485→          <Window position={[-0.8, 0.9, 0.71]} size={[0.35, 0.5]} color="#3a4a5a" />
+   486→          <Window position={[0.8, 0.9, 0.71]} size={[0.35, 0.5]} color="#3a4a5a" />
+   487→          <Window position={[-0.8, 1.3, 0.71]} size={[0.35, 0.3]} color="#3a4a5a" />
+   488→          <Window position={[0.8, 1.3, 0.71]} size={[0.35, 0.3]} color="#3a4a5a" />
+   489→          {/* Flagpole */}
+   490→          <mesh position={[1.2, 1.5, 0.6]}>
+   491→            <cylinderGeometry args={[0.04, 0.04, 1.5, 6]} />
+   492→            <meshStandardMaterial color="#3a3a3a" />
+   493→          </mesh>
+   494→          <mesh position={[1.35, 2.1, 0.6]}>
+   495→            <planeGeometry args={[0.3, 0.2]} />
+   496→            <meshStandardMaterial color="#aa3333" side={THREE.DoubleSide} />
+   497→          </mesh>
+   498→        </group>
+   499→      );
+   500→    case "church":
+   501→      return (
+   502→        <group>
+   503→          {/* Nave (main body) */}
+   504→          <mesh position={[0, 0.75, 0.3]} castShadow>
+   505→            <boxGeometry args={[1.2, 1.5, 1.8]} />
+   506→            <meshStandardMaterial color={color} flatShading />
+   507→          </mesh>
+   508→          {/* Roof — triangular prism */}
+   509→          <mesh position={[0, 1.7, 0.3]} rotation={[0, 0, 0]} castShadow>
+   510→            <cylinderGeometry args={[0.7, 0.7, 1.8, 3]} />
+   511→            <meshStandardMaterial color="#3a2a1a" flatShading />
+   512→          </mesh>
+   513→          {/* Bell tower */}
+   514→          <mesh position={[0, 1.2, -0.7]} castShadow>
+   515→            <boxGeometry args={[0.8, 2.4, 0.8]} />
+   516→            <meshStandardMaterial color={color} flatShading />
+   517→          </mesh>
+   518→          {/* Bell tower roof — pyramid */}
+   519→          <mesh position={[0, 2.7, -0.7]} rotation={[0, Math.PI / 4, 0]} castShadow>
+   520→            <coneGeometry args={[0.65, 0.8, 4]} />
+   521→            <meshStandardMaterial color="#3a2a1a" flatShading />
+   522→          </mesh>
+   523→          {/* Bell opening */}
+   524→          <mesh position={[0, 1.5, -0.31]}>
+   525→            <boxGeometry args={[0.4, 0.5, 0.05]} />
+   526→            <meshStandardMaterial color="#1a1a1a" />
+   527→          </mesh>
+   528→          {/* Cross on top */}
+   529→          <mesh position={[0, 3.3, -0.7]}>
+   530→            <boxGeometry args={[0.05, 0.4, 0.05]} />
+   531→            <meshStandardMaterial color="#aaaaaa" metalness={0.5} />
+   532→          </mesh>
+   533→          <mesh position={[0, 3.35, -0.7]}>
+   534→            <boxGeometry args={[0.25, 0.05, 0.05]} />
+   535→            <meshStandardMaterial color="#aaaaaa" metalness={0.5} />
+   536→          </mesh>
+   537→          {/* Main door (arched look) */}
+   538→          <Door position={[0, 0.5, 1.21]} size={[0.5, 1]} color="#1a0a00" />
+   539→          {/* Stained glass windows */}
+   540→          <Window position={[-0.45, 1, 1.21]} size={[0.3, 0.5]} color="#aa6a3a" />
+   541→          <Window position={[0.45, 1, 1.21]} size={[0.3, 0.5]} color="#aa6a3a" />
+   542→          {/* Gravestones */}
+   543→          <mesh position={[1, 0.3, 0.5]} castShadow>
+   544→            <boxGeometry args={[0.2, 0.5, 0.05]} />
+   545→            <meshStandardMaterial color="#6a6a6a" flatShading />
+   546→          </mesh>
+   547→          <mesh position={[-1, 0.3, 0.8]} castShadow>
+   548→            <boxGeometry args={[0.2, 0.4, 0.05]} />
+   549→            <meshStandardMaterial color="#5a5a5a" flatShading />
+   550→          </mesh>
+   551→        </group>
+   552→      );
+   553→    case "factory":
+   554→      return (
+   555→        <group>
+   556→          {/* Main body */}
+   557→          <mesh position={[0, 0.75, 0]} castShadow>
+   558→            <boxGeometry args={[2.2, 1.5, 1.6]} />
+   559→            <meshStandardMaterial color={color} flatShading />
+   560→          </mesh>
+   561→          {/* Sawtooth roof — multiple angled sections */}
+   562→          {[-0.7, -0.2, 0.3, 0.8].map((x, i) => (
+   563→            <mesh key={i} position={[x, 1.6, 0]} rotation={[0, 0, Math.PI / 6]} castShadow>
+   564→              <boxGeometry args={[0.45, 0.05, 1.6]} />
+   565→              <meshStandardMaterial color="#2a2a2a" flatShading />
+   566→            </mesh>
+   567→          ))}
+   568→          {/* Two chimneys */}
+   569→          <mesh position={[-0.6, 2, 0]} castShadow>
+   570→            <cylinderGeometry args={[0.22, 0.28, 1.2, 8]} />
+   571→            <meshStandardMaterial color="#3a3a3a" flatShading />
+   572→          </mesh>
+   573→          <mesh position={[-0.6, 2.65, 0]}>
+   574→            <cylinderGeometry args={[0.22, 0.22, 0.15, 8]} />
+   575→            <meshStandardMaterial color="#1a1a1a" flatShading />
+   576→          </mesh>
+   577→          <mesh position={[0.6, 2.3, 0]} castShadow>
+   578→            <cylinderGeometry args={[0.18, 0.22, 1.6, 8]} />
+   579→            <meshStandardMaterial color="#3a3a3a" flatShading />
+   580→          </mesh>
+   581→          <mesh position={[0.6, 3.15, 0]}>
+   582→            <cylinderGeometry args={[0.18, 0.18, 0.15, 8]} />
+   583→            <meshStandardMaterial color="#1a1a1a" flatShading />
+   584→          </mesh>
+   585→          {/* Large industrial door */}
+   586→          <mesh position={[0, 0.6, 0.81]}>
+   587→            <boxGeometry args={[1.2, 1.2, 0.05]} />
+   588→            <meshStandardMaterial color="#2a2a2a" flatShading />
+   589→          </mesh>
+   590→          {/* Rust stains */}
+   591→          <mesh position={[-0.7, 0.5, 0.81]}>
+   592→            <planeGeometry args={[0.4, 0.6]} />
+   593→            <meshStandardMaterial color="#5a3a1a" transparent opacity={0.4} />
+   594→          </mesh>
+   595→          {/* Pipes on side */}
+   596→          <mesh position={[1.11, 1, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+   597→            <cylinderGeometry args={[0.08, 0.08, 1.4, 6]} />
+   598→            <meshStandardMaterial color="#5a4a3a" />
+   599→          </mesh>
+   600→          <mesh position={[1.11, 0.5, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+   601→            <cylinderGeometry args={[0.06, 0.06, 1.4, 6]} />
+   602→            <meshStandardMaterial color="#3a3a3a" />
+   603→          </mesh>
+   604→        </group>
+   605→      );
+   606→    case "pharmacy":
+   607→      return (
+   608→        <group>
+   609→          {/* Main body */}
+   610→          <mesh position={[0, 0.6, 0]} castShadow>
+   611→            <boxGeometry args={[1.3, 1.2, 1.2]} />
+   612→            <meshStandardMaterial color={color} flatShading />
+   613→          </mesh>
+   614→          {/* Flat roof */}
+   615→          <mesh position={[0, 1.25, 0]} castShadow>
+   616→            <boxGeometry args={[1.4, 0.1, 1.3]} />
+   617→            <meshStandardMaterial color="#3a3a3a" flatShading />
+   618→          </mesh>
+   619→          {/* Green cross sign (pharmacy) */}
+   620→          <mesh position={[0, 1, 0.61]}>
+   621→            <boxGeometry args={[0.4, 0.4, 0.05]} />
+   622→            <meshStandardMaterial color="#22aa55" emissive="#22aa55" emissiveIntensity={0.3} />
+   623→          </mesh>
+   624→          <mesh position={[0, 1, 0.63]}>
+   625→            <boxGeometry args={[0.15, 0.15, 0.05]} />
+   626→            <meshStandardMaterial color="#ffffff" />
+   627→          </mesh>
+   628→          {/* Door */}
+   629→          <Door position={[0, 0.35, 0.61]} size={[0.4, 0.7]} color="#1a1a1a" />
+   630→          {/* Display windows */}
+   631→          <Window position={[-0.45, 0.6, 0.61]} size={[0.35, 0.5]} color="#4a6a5a" />
+   632→          <Window position={[0.45, 0.6, 0.61]} size={[0.35, 0.5]} color="#4a6a5a" />
+   633→          {/* Awning */}
+   634→          <mesh position={[0, 0.85, 0.75]} rotation={[-Math.PI / 6, 0, 0]} castShadow>
+   635→            <boxGeometry args={[1.2, 0.05, 0.4]} />
+   636→            <meshStandardMaterial color="#3a8a5a" flatShading />
+   637→          </mesh>
+   638→        </group>
+   639→      );
+   640→    default:
+   641→      return (
+   642→        <mesh position={[0, 0.6, 0]} castShadow>
+   643→          <boxGeometry args={[1.2, 1.2, 1.2]} />
+   644→          <meshStandardMaterial color={color} flatShading />
+   645→        </mesh>
+   646→      );
+   647→  }
+   648→}
+   649→
+   650→// ---------- Animated location marker ----------
+   651→function LocationMarker({
+   652→  location,
+   653→  selected,
+   654→  onClick,
+   655→  hasMission,
+   656→}: {
+   657→  location: GameLocation;
+   658→  selected: boolean;
+   659→  onClick: () => void;
+   660→  hasMission: boolean;
+   661→}) {
+   662→  const def = LOCATION_DEFS[location.type];
+   663→  const ringRef = useRef<THREE.Mesh>(null);
+   664→  const [hovered, setHovered] = useState(false);
+   665→
+   666→  useFrame((state) => {
+   667→    if (ringRef.current) {
+   668→      const t = state.clock.elapsedTime;
+   669→      const scale = 1 + Math.sin(t * 2) * 0.15;
+   670→      ringRef.current.scale.setScalar(scale);
+   671→    }
+   672→  });
+   673→
+   674→  const markerColor = location.salvageDepleted
+   675→    ? "#6b7280" // grey for depleted
+   676→    : location.cleared
+   677→    ? "#22c55e" // green for cleared (still has salvage)
+   678→    : hasMission
+   679→    ? "#fbbf24"
+   680→    : selected
+   681→    ? "#ef4444"
+   682→    : hovered
+   683→    ? "#f87171"
+   684→    : "#dc2626";
+   685→
+   686→  return (
+   687→    <group position={location.position}>
+   688→      {/* Invisible larger click-catcher for easier interaction (box for top-down view) */}
+   689→      <mesh
+   690→        position={[0, 1, 0]}
+   691→        onClick={(e) => {
+   692→          e.stopPropagation();
+   693→          onClick();
+   694→        }}
+   695→        onPointerOver={(e) => {
+   696→          e.stopPropagation();
+   697→          setHovered(true);
+   698→          document.body.style.cursor = "pointer";
+   699→        }}
+   700→        onPointerOut={() => {
+   701→          setHovered(false);
+   702→          document.body.style.cursor = "auto";
+   703→        }}
+   704→      >
+   705→        <boxGeometry args={[3, 3, 3]} />
+   706→        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+   707→      </mesh>
+   708→
+   709→      {/* The building — faded if cleared */}
+   710→      <group>
+   711→        <LocationBuilding type={location.type} />
+   712→        {location.cleared && (
+   713→          // Overlay a translucent green tint on cleared buildings
+   714→          <mesh position={[0, 0, 0]}>
+   715→            <boxGeometry args={[2.5, 2.5, 2.5]} />
+   716→            <meshBasicMaterial
+   717→              color="#22c55e"
+   718→              transparent
+   719→              opacity={0.15}
+   720→              depthWrite={false}
+   721→            />
+   722→          </mesh>
+   723→        )}
+   724→      </group>
+   725→
+   726→      {/* Selection ring (animated) — for selected/hovered/mission */}
+   727→      {(selected || hovered || hasMission) && (
+   728→        <mesh
+   729→          ref={ringRef}
+   730→          rotation={[-Math.PI / 2, 0, 0]}
+   731→          position={[0, 0.05, 0]}
+   732→        >
+   733→          <ringGeometry args={[1.5, 1.7, 24]} />
+   734→          <meshBasicMaterial
+   735→            color={markerColor}
+   736→            transparent
+   737→            opacity={0.8}
+   738→            side={THREE.DoubleSide}
+   739→          />
+   740→        </mesh>
+   741→      )}
+   742→
+   743→      {/* Always-on small dot */}
+   744→      <mesh position={[0, 0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+   745→        <circleGeometry args={[0.3, 16]} />
+   746→        <meshBasicMaterial color={markerColor} />
+   747→      </mesh>
+   748→
+   749→      {/* Cleared indicator — green ring on the ground + floating checkmark flag */}
+   750→      {location.cleared && (
+   751→        <>
+   752→          {/* Persistent green ring on the ground (always visible from top) */}
+   753→          <mesh
+   754→            rotation={[-Math.PI / 2, 0, 0]}
+   755→            position={[0, 0.08, 0]}
+   756→          >
+   757→            <ringGeometry args={[2.0, 2.3, 24]} />
+   758→            <meshBasicMaterial
+   759→              color="#22c55e"
+   760→              transparent
+   761→              opacity={0.6}
+   762→              side={THREE.DoubleSide}
+   763→            />
+   764→          </mesh>
+   765→          {/* Floating flag with checkmark (visible from any angle) */}
+   766→          <group position={[0, 3.5, 0]}>
+   767→            {/* Pole */}
+   768→            <mesh position={[0, -0.6, 0]}>
+   769→              <cylinderGeometry args={[0.04, 0.04, 1.2, 6]} />
+   770→              <meshBasicMaterial color="#1a1a1a" />
+   771→            </mesh>
+   772→            {/* Flag */}
+   773→            <mesh position={[0.3, -0.1, 0]}>
+   774→              <planeGeometry args={[0.6, 0.4]} />
+   775→              <meshBasicMaterial color="#22c55e" side={THREE.DoubleSide} />
+   776→            </mesh>
+   777→          </group>
+   778→        </>
+   779→      )}
+   780→
+   781→      {/* Hover label — fixed screen size, follows the 3D position.
+   782→          Only shown while actively hovering (not when selected), so the
+   783→          tooltip disappears after the player clicks the building. */}
+   784→      {hovered && (
+   785→        <Html
+   786→          position={[0, 3.5, 0]}
+   787→          center
+   788→          prepend
+   789→          zIndexRange={[100, 0]}
+   790→          style={{ pointerEvents: "none" }}
+   791→        >
+   792→          <div className="bg-stone-950/95 border border-stone-700 rounded px-3 py-2 text-xs text-stone-100 whitespace-nowrap shadow-xl">
+   793→            <div className="font-bold text-amber-100 text-sm">{def.label}</div>
+   794→            <div className="text-[11px] text-stone-400 mt-0.5">
+   795→              {location.cleared ? (
+   796→                <span className="text-emerald-400">✓ Cleared</span>
+   797→              ) : (
+   798→                <>
+   799→                  {ENEMY_INFO[location.enemyType].icon} {location.enemyCount}{" "}
+   800→                  {ENEMY_INFO[location.enemyType].label}
+   801→                </>
+   802→              )}
+   803→            </div>
+   804→            {!location.cleared &&
+   805→              Object.keys(location.loot).length > 0 && (
+   806→                <div className="mt-1.5 pt-1.5 border-t border-stone-800">
+   807→                  <div className="text-[9px] uppercase tracking-wide text-stone-500 mb-0.5">
+   808→                    Expected Loot
+   809→                  </div>
+   810→                  <div className="flex items-center gap-2 flex-wrap">
+   811→                    {Object.entries(location.loot).map(([k, v]) => (
+   812→                      <span
+   813→                        key={k}
+   814→                        className="flex items-center gap-0.5 text-[11px] text-stone-200"
+   815→                      >
+   816→                        <span>
+   817→                          {
+   818→                            RESOURCE_INFO[k as keyof typeof RESOURCE_INFO]
+   819→                              .icon
+   820→                          }
+   821→                        </span>
+   822→                        <span className="font-medium">{v}</span>
+   823→                      </span>
+   824→                    ))}
+   825→                  </div>
+   826→                </div>
+   827→              )}
+   828→            {location.cleared &&
+   829→              !location.salvageDepleted &&
+   830→              Object.keys(location.salvagePool).length > 0 && (
+   831→                <div className="mt-1.5 pt-1.5 border-t border-stone-800">
+   832→                  <div className="text-[9px] uppercase tracking-wide text-emerald-500 mb-0.5">
+   833→                    Salvage Pool
+   834→                  </div>
+   835→                  <div className="flex items-center gap-2 flex-wrap">
+   836→                    {Object.entries(location.salvagePool).map(([k, v]) => (
+   837→                      <span
+   838→                        key={k}
+   839→                        className="flex items-center gap-0.5 text-[11px] text-emerald-200"
+   840→                      >
+   841→                        <span>
+   842→                          {
+   843→                            RESOURCE_INFO[k as keyof typeof RESOURCE_INFO]
+   844→                              .icon
+   845→                          }
+   846→                        </span>
+   847→                        <span className="font-medium">{v as number}</span>
+   848→                      </span>
+   849→                    ))}
+   850→                  </div>
+   851→                </div>
+   852→              )}
+   853→            {location.cleared && location.salvageDepleted && (
+   854→              <div className="mt-1.5 pt-1.5 border-t border-stone-800">
+   855→                <div className="text-[10px] text-stone-500 italic">
+   856→                  Fully salvaged
+   857→                </div>
+   858→              </div>
+   859→            )}
+   860→          </div>
+   861→        </Html>
+   862→      )}
+   863→    </group>
+   864→  );
+   865→}
+   866→
+   867→// ---------- Mission Lines ----------
+   868→function MissionLines() {
+   869→  const missions = useGameStore((s) => s.missions);
+   870→  const locations = useGameStore((s) => s.locations);
+   871→  const teams = useGameStore((s) => s.teams);
+   872→
+   873→  const pendingMissions = missions.filter((m) => m.status === "pending");
+   874→
+   875→  return (
+   876→    <>
+   877→      {pendingMissions.map((m) => {
+   878→        const loc = locations.find((l) => l.id === m.locationId);
+   879→        if (!loc) return null;
+   880→        const team = teams.find((t) => t.id === m.teamId);
+   881→        // Salvage missions use a green dashed line, scout missions use team color
+   882→        const isSalvage = m.missionType === "salvage";
+   883→        const teamColor = isSalvage
+   884→          ? "#22c55e"
+   885→          : team?.name?.toLowerCase().includes("alpha")
+   886→          ? "#fbbf24"
+   887→          : team?.name?.toLowerCase().includes("bravo")
+   888→          ? "#60a5fa"
+   889→          : "#a78bfa";
+   890→        return (
+   891→          <Line
+   892→            key={m.id}
+   893→            points={[
+   894→              [0, 0.5, 0],
+   895→              [loc.position[0], 0.5, loc.position[2]],
+   896→            ]}
+   897→            color={teamColor}
+   898→            lineWidth={2}
+   899→            dashed
+   900→            dashSize={0.5}
+   901→            gapSize={0.3}
+   902→          />
+   903→        );
+   904→      })}
+   905→    </>
+   906→  );
+   907→}
+   908→
+   909→// ---------- 3D Scene ----------
+   910→function Scene({
+   911→  selectedLocationId,
+   912→  onSelectLocation,
+   913→}: {
+   914→  selectedLocationId: string | null;
+   915→  onSelectLocation: (id: string | null) => void;
+   916→}) {
+   917→  const locations = useGameStore((s) => s.locations);
+   918→  const missions = useGameStore((s) => s.missions);
+   919→
+   920→  return (
+   921→    <>
+   922→      <color attach="background" args={["#1a1410"]} />
+   923→      <fog attach="fog" args={["#1a1410", 45, 90]} />
+   924→
+   925→      <ambientLight intensity={0.4} />
+   926→      <directionalLight
+   927→        position={[10, 15, 5]}
+   928→        intensity={1.2}
+   929→        castShadow
+   930→        shadow-mapSize={[1024, 1024]}
+   931→      />
+   932→      <hemisphereLight args={["#9a8a6a", "#2a2a1a", 0.4]} />
+   933→
+   934→      <Terrain />
+   935→      <BaseBuildings />
+   936→
+   937→      {locations.map((loc) => {
+   938→        const hasMission = missions.some(
+   939→          (m) => m.locationId === loc.id && m.status === "pending"
+   940→        );
+   941→        return (
+   942→          <LocationMarker
+   943→            key={loc.id}
+   944→            location={loc}
+   945→            selected={selectedLocationId === loc.id}
+   946→            hasMission={hasMission}
+   947→            onClick={() =>
+   948→              onSelectLocation(
+   949→                selectedLocationId === loc.id ? null : loc.id
+   950→              )
+   951→            }
+   952→          />
+   953→        );
+   954→      })}
+   955→
+   956→      <MissionLines />
+   957→
+   958→      <MapControls
+   959→        enableRotate={false}
+   960→        enablePan={true}
+   961→        enableZoom={true}
+   962→        minDistance={12}
+   963→        maxDistance={55}
+   964→        target={[0, 0, 0]}
+   965→        screenSpacePanning={false}
+   966→      />
+   967→    </>
+   968→  );
+   969→}
+   970→
+   971→// ---------- Main World Map View ----------
+   972→export function WorldMapView() {
+   973→  const locations = useGameStore((s) => s.locations);
+   974→  const teams = useGameStore((s) => s.teams);
+   975→  const survivors = useGameStore((s) => s.survivors);
+   976→  const missions = useGameStore((s) => s.missions);
+   977→  const assignTeamToLocation = useGameStore((s) => s.assignTeamToLocation);
+   978→  const assignTeamToSalvage = useGameStore((s) => s.assignTeamToSalvage);
+   979→  const clearTeamLocation = useGameStore((s) => s.clearTeamLocation);
+   980→  const createTeam = useGameStore((s) => s.createTeam);
+   981→
+   982→  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(
+   983→    null
+   984→  );
+   985→  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+   986→
+   987→  const selectedLocation = locations.find((l) => l.id === selectedLocationId);
+   988→  const selectedTeam = teams.find((t) => t.id === selectedTeamId);
+   989→
+   990→  // Determine mission type based on location state
+   991→  const isSalvageMission =
+   992→    selectedLocation?.cleared && !selectedLocation?.salvageDepleted;
+   993→
+   994→  const handleAssign = () => {
+   995→    if (!selectedTeamId || !selectedLocationId) return;
+   996→    const team = teams.find((t) => t.id === selectedTeamId);
+   997→    if (!team || team.memberIds.length === 0) return;
+   998→    // Don't allow if team already has a pending mission (defensive — UI also blocks this)
+   999→    const teamHasPending = missions.some(
+  1000→      (m) => m.teamId === selectedTeamId && m.status === "pending"
+  1001→    );
+  1002→    if (teamHasPending) return;
+  1003→    if (isSalvageMission) {
+  1004→      assignTeamToSalvage(selectedTeamId, selectedLocationId);
+  1005→    } else {
+  1006→      assignTeamToLocation(selectedTeamId, selectedLocationId);
+  1007→    }
+  1008→    // Clear team selection so the player must pick again (the just-dispatched team is now blocked)
+  1009→    setSelectedTeamId(null);
+  1010→  };
+  1011→
+  1012→  const handleClearMission = (teamId: string) => {
+  1013→    clearTeamLocation(teamId);
+  1014→  };
+  1015→
+  1016→  const pendingMissions = missions.filter((m) => m.status === "pending");
+  1017→
+  1018→  return (
+  1019→    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-3">
+  1020→      {/* 3D Map */}
+  1021→      <Card className="bg-stone-950 border-stone-800 overflow-hidden h-[60vh] lg:h-[75vh] relative">
+  1022→        <div className="absolute top-3 left-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-3 py-1.5">
+  1023→          <div className="text-xs text-stone-400">WORLD MAP</div>
+  1024→          <div className="text-[10px] text-stone-500">
+  1025→            Click a location to scout • Drag to pan • Scroll to zoom
+  1026→          </div>
+  1027→        </div>
+  1028→        <div className="absolute top-3 right-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-2 py-1.5 flex items-center gap-2">
+  1029→          <div className="flex items-center gap-1">
+  1030→            <div className="w-2 h-2 rounded-full bg-red-600" />
+  1031→            <span className="text-[10px] text-stone-400">Hostile</span>
+  1032→          </div>
+  1033→          <div className="flex items-center gap-1">
+  1034→            <div className="w-2 h-2 rounded-full bg-amber-400" />
+  1035→            <span className="text-[10px] text-stone-400">Mission</span>
+  1036→          </div>
+  1037→          <div className="flex items-center gap-1">
+  1038→            <div className="w-2 h-2 rounded-full bg-green-500" />
+  1039→            <span className="text-[10px] text-stone-400">Cleared</span>
+  1040→          </div>
+  1041→          <div className="flex items-center gap-1">
+  1042→            <div className="w-2 h-2 rounded-full bg-stone-500" />
+  1043→            <span className="text-[10px] text-stone-400">Depleted</span>
+  1044→          </div>
+  1045→        </div>
+  1046→        <Canvas
+  1047→          shadows
+  1048→          camera={{ position: [0, 22, 18], fov: 45 }}
+  1049→          gl={{ antialias: false }}
+  1050→        >
+  1051→          <Scene
+  1052→            selectedLocationId={selectedLocationId}
+  1053→            onSelectLocation={setSelectedLocationId}
+  1054→          />
+  1055→        </Canvas>
+  1056→      </Card>
+  1057→
+  1058→      {/* Side panel */}
+  1059→      <div className="space-y-3">
+  1060→        {/* Selected location info */}
+  1061→        {selectedLocation ? (
+  1062→          <Card className="bg-stone-900/60 border-stone-800 p-4">
+  1063→            <div className="flex items-start justify-between mb-2">
+  1064→              <div className="flex items-center gap-2">
+  1065→                <span className="text-2xl">
+  1066→                  {LOCATION_DEFS[selectedLocation.type].icon}
+  1067→                </span>
+  1068→                <div>
+  1069→                  <div className="font-bold text-stone-100">
+  1070→                    {selectedLocation.name}
+  1071→                  </div>
+  1072→                  <div className="text-[10px] text-stone-500">
+  1073→                    {selectedLocation.cleared
+  1074→                      ? "Cleared — safe to revisit"
+  1075→                      : `${selectedLocation.distance} day travel`}
+  1076→                  </div>
+  1077→                </div>
+  1078→              </div>
+  1079→              <Button
+  1080→                size="icon"
+  1081→                variant="ghost"
+  1082→                className="h-6 w-6 text-stone-500 hover:text-stone-300"
+  1083→                onClick={() => setSelectedLocationId(null)}
+  1084→              >
+  1085→                <X className="w-4 h-4" />
+  1086→              </Button>
+  1087→            </div>
+  1088→
+  1089→            <p className="text-xs text-stone-400 mb-3">
+  1090→              {LOCATION_DEFS[selectedLocation.type].description}
+  1091→            </p>
+  1092→
+  1093→            {/* Danger */}
+  1094→            <div className="space-y-2">
+  1095→              {!selectedLocation.cleared ? (
+  1096→                <div className="bg-stone-950/50 rounded p-2 border border-stone-800">
+  1097→                  <div className="flex items-center gap-1.5 text-xs text-stone-300 mb-1">
+  1098→                    <Skull className="w-3 h-3 text-red-400" />
+  1099→                    <span className="font-medium">Threat</span>
+  1100→                  </div>
+  1101→                  <div className="flex items-center gap-2">
+  1102→                    <span className="text-lg">
+  1103→                      {ENEMY_INFO[selectedLocation.enemyType].icon}
+  1104→                    </span>
+  1105→                    <div className="flex-1">
+  1106→                      <div className="text-sm text-stone-200">
+  1107→                        {selectedLocation.enemyCount} {ENEMY_INFO[selectedLocation.enemyType].label}
+  1108→                      </div>
+  1109→                      <div className="flex gap-0.5 mt-0.5">
+  1110→                        {[1, 2, 3, 4, 5].map((i) => (
+  1111→                          <div
+  1112→                            key={i}
+  1113→                            className={`h-1.5 flex-1 rounded-sm ${
+  1114→                              i <= selectedLocation.dangerLevel
+  1115→                                ? selectedLocation.dangerLevel >= 4
+  1116→                                  ? "bg-red-500"
+  1117→                                  : selectedLocation.dangerLevel >= 3
+  1118→                                  ? "bg-orange-500"
+  1119→                                  : "bg-amber-500"
+  1120→                                : "bg-stone-800"
+  1121→                            }`}
+  1122→                          />
+  1123→                        ))}
+  1124→                      </div>
+  1125→                    </div>
+  1126→                  </div>
+  1127→                </div>
+  1128→              ) : (
+  1129→                <div className="bg-emerald-950/30 rounded p-2 border border-emerald-900/50">
+  1130→                  <div className="text-xs text-emerald-300 flex items-center gap-1.5 mb-1">
+  1131→                    <Package className="w-3 h-3" />
+  1132→                    {selectedLocation.salvageDepleted
+  1133→                      ? "Depleted — nothing left to salvage"
+  1134→                      : "Cleared — ready to salvage ruins"}
+  1135→                  </div>
+  1136→                  {!selectedLocation.salvageDepleted &&
+  1137→                    Object.keys(selectedLocation.salvagePool).length > 0 && (
+  1138→                      <div className="mt-1.5">
+  1139→                        <div className="text-[9px] uppercase tracking-wide text-stone-500 mb-1">
+  1140→                          Salvage Pool (remaining)
+  1141→                        </div>
+  1142→                        <div className="flex flex-wrap gap-1.5">
+  1143→                          {Object.entries(selectedLocation.salvagePool).map(
+  1144→                            ([k, v]) => (
+  1145→                              <Badge
+  1146→                                key={k}
+  1147→                                variant="outline"
+  1148→                                className="text-[10px] border-emerald-800 bg-emerald-950/30 text-emerald-300"
+  1149→                              >
+  1150→                                {
+  1151→                                  RESOURCE_INFO[k as keyof typeof RESOURCE_INFO]
+  1152→                                    .icon
+  1153→                                }{" "}
+  1154→                                {v as number} {k}
+  1155→                              </Badge>
+  1156→                            )
+  1157→                          )}
+  1158→                        </div>
+  1159→                      </div>
+  1160→                    )}
+  1161→                </div>
+  1162→              )}
+  1163→
+  1164→              {/* Loot */}
+  1165→              <div className="bg-stone-950/50 rounded p-2 border border-stone-800">
+  1166→                <div className="flex items-center gap-1.5 text-xs text-stone-300 mb-1">
+  1167→                  <Package className="w-3 h-3 text-amber-400" />
+  1168→                  <span className="font-medium">Expected Loot</span>
+  1169→                </div>
+  1170→                <div className="flex flex-wrap gap-1.5">
+  1171→                  {Object.entries(selectedLocation.loot).map(([k, v]) => (
+  1172→                    <Badge
+  1173→                      key={k}
+  1174→                      variant="outline"
+  1175→                      className="text-[10px] border-stone-700 bg-stone-900"
+  1176→                    >
+  1177→                      {RESOURCE_INFO[k as keyof typeof RESOURCE_INFO].icon} {v} {k}
+  1178→                    </Badge>
+  1179→                  ))}
+  1180→                </div>
+  1181→              </div>
+  1182→
+  1183→              {/* Survivor chance */}
+  1184→              <div className="bg-stone-950/50 rounded p-2 border border-stone-800">
+  1185→                <div className="flex items-center gap-1.5 text-xs text-stone-300 mb-1">
+  1186→                  <Users className="w-3 h-3 text-emerald-400" />
+  1187→                  <span className="font-medium">Survivor Chance</span>
+  1188→                </div>
+  1189→                <div className="text-sm text-emerald-300">
+  1190→                  {Math.round(selectedLocation.survivorChance * 100)}%
+  1191→                </div>
+  1192→              </div>
+  1193→            </div>
+  1194→
+  1195→            {/* Assign team / Salvage */}
+  1196→            <div className="mt-3 pt-3 border-t border-stone-800">
+  1197→              {isSalvageMission ? (
+  1198→                <>
+  1199→                  <div className="text-[10px] uppercase tracking-wide text-emerald-500 mb-1.5 flex items-center gap-1">
+  1200→                    <Pickaxe className="w-3 h-3" />
+  1201→                    Salvage Operation
+  1202→                  </div>
+  1203→                  <div className="text-[11px] text-stone-400 mb-2 leading-snug">
+  1204→                    Send a team to extract resources from the ruins. Yield
+  1205→                    scales with the team&apos;s total Scavenge skill.
+  1206→                  </div>
+  1207→                </>
+  1208→              ) : (
+  1209→                <div className="text-[10px] uppercase tracking-wide text-stone-500 mb-1.5">
+  1210→                  Dispatch Team
+  1211→                </div>
+  1212→              )}
+  1213→              {teams.length === 0 ? (
+  1214→                <div className="text-xs text-stone-500 mb-2">
+  1215→                  No teams yet. Create one in the Survivors tab.
+  1216→                </div>
+  1217→              ) : (
+  1218→                <div className="space-y-1 mb-2 max-h-32 overflow-y-auto">
+  1219→                  {teams.map((t) => {
+  1220→                    const teamSurvivors = survivors.filter((s) =>
+  1221→                      t.memberIds.includes(s.id)
+  1222→                    );
+  1223→                    const hasMission = pendingMissions.some(
+  1224→                      (m) => m.teamId === t.id
+  1225→                    );
+  1226→                    // For salvage, show the team's total scavenge skill
+  1227→                    const teamScavenge = teamSurvivors.reduce(
+  1228→                      (sum, s) => sum + s.skills.scavenging,
+  1229→                      0
+  1230→                    );
+  1231→                    return (
+  1232→                      <button
+  1233→                        key={t.id}
+  1234→                        onClick={() => setSelectedTeamId(t.id)}
+  1235→                        disabled={hasMission || teamSurvivors.length === 0}
+  1236→                        className={`w-full text-left p-2 rounded text-xs border transition-colors ${
+  1237→                          selectedTeamId === t.id
+  1238→                            ? isSalvageMission
+  1239→                              ? "border-emerald-600 bg-emerald-950/30 text-emerald-200"
+  1240→                              : "border-amber-600 bg-amber-950/30 text-amber-200"
+  1241→                            : hasMission
+  1242→                            ? "border-stone-800 bg-stone-950/50 text-stone-600 cursor-not-allowed"
+  1243→                            : teamSurvivors.length === 0
+  1244→                            ? "border-stone-800 bg-stone-950/50 text-stone-600 cursor-not-allowed"
+  1245→                            : "border-stone-700 bg-stone-900/50 text-stone-300 hover:border-stone-600"
+  1246→                        }`}
+  1247→                      >
+  1248→                        <div className="flex items-center justify-between">
+  1249→                          <span className="font-medium">{t.name}</span>
+  1250→                          <span className="text-[10px] text-stone-500">
+  1251→                            {teamSurvivors.length} ready
+  1252→                            {isSalvageMission && (
+  1253→                              <span className="ml-1 text-emerald-500">
+  1254→                                · scavenge {teamScavenge}
+  1255→                              </span>
+  1256→                            )}
+  1257→                          </span>
+  1258→                        </div>
+  1259→                        {hasMission && (
+  1260→                          <div className="text-[10px] text-amber-500 mt-0.5">
+  1261→                            Already dispatched
+  1262→                          </div>
+  1263→                        )}
+  1264→                      </button>
+  1265→                    );
+  1266→                  })}
+  1267→                </div>
+  1268→              )}
+  1269→              {isSalvageMission ? (
+  1270→                <Button
+  1271→                  size="sm"
+  1272→                  className="w-full bg-emerald-700 hover:bg-emerald-600 text-emerald-50"
+  1273→                  disabled={
+  1274→                    !selectedTeamId ||
+  1275→                    (selectedTeamId
+  1276→                      ? missions.some(
+  1277→                          (m) =>
+  1278→                            m.teamId === selectedTeamId &&
+  1279→                            m.status === "pending"
+  1280→                        )
+  1281→                      : true)
+  1282→                  }
+  1283→                  onClick={handleAssign}
+  1284→                >
+  1285→                  <Hammer className="w-3 h-3 mr-1" />
+  1286→                  Send Salvage Team
+  1287→                </Button>
+  1288→              ) : (
+  1289→                <Button
+  1290→                  size="sm"
+  1291→                  className="w-full bg-amber-700 hover:bg-amber-600 text-amber-50"
+  1292→                  disabled={
+  1293→                    !selectedTeamId ||
+  1294→                    // Disable if selected team already has a pending mission
+  1295→                    (selectedTeamId
+  1296→                      ? missions.some(
+  1297→                          (m) =>
+  1298→                            m.teamId === selectedTeamId &&
+  1299→                            m.status === "pending"
+  1300→                        )
+  1301→                      : true)
+  1302→                  }
+  1303→                  onClick={handleAssign}
+  1304→                >
+  1305→                  <Target className="w-3 h-3 mr-1" />
+  1306→                  Dispatch Team
+  1307→                </Button>
+  1308→              )}
+  1309→            </div>
+  1310→          </Card>
+  1311→        ) : (
+  1312→          <Card className="bg-stone-900/40 border-stone-800 border-dashed p-6 text-center">
+  1313→            <MapPin className="w-8 h-8 mx-auto text-stone-600 mb-2" />
+  1314→            <div className="text-sm text-stone-400 font-medium mb-1">
+  1315→              Select a location
+  1316→            </div>
+  1317→            <div className="text-xs text-stone-500">
+  1318→              Click any marker on the map to view details and dispatch a team.
+  1319→            </div>
+  1320→          </Card>
+  1321→        )}
+  1322→
+  1323→        {/* Pending missions list */}
+  1324→        <Card className="bg-stone-900/60 border-stone-800 p-3">
+  1325→          <div className="flex items-center justify-between mb-2">
+  1326→            <div className="text-xs uppercase tracking-wide text-stone-500 flex items-center gap-1.5">
+  1327→              <Flag className="w-3 h-3" />
+  1328→              Pending Missions
+  1329→            </div>
+  1330→            <Badge
+  1331→              variant="outline"
+  1332→              className="text-[10px] border-stone-700 text-stone-400"
+  1333→            >
+  1334→              {pendingMissions.length}
+  1335→            </Badge>
+  1336→          </div>
+  1337→          {pendingMissions.length === 0 ? (
+  1338→            <div className="text-xs text-stone-500 italic py-2">
+  1339→              No teams dispatched. Click a location to send one.
+  1340→            </div>
+  1341→          ) : (
+  1342→            <ScrollArea className="max-h-48">
+  1343→              <div className="space-y-1.5 pr-2">
+  1344→                {pendingMissions.map((m) => {
+  1345→                  const team = teams.find((t) => t.id === m.teamId);
+  1346→                  const loc = locations.find((l) => l.id === m.locationId);
+  1347→                  const teamSurvivors = survivors.filter((s) =>
+  1348→                    m.team.includes(s.id)
+  1349→                  );
+  1350→                  const isSalvage = m.missionType === "salvage";
+  1351→                  return (
+  1352→                    <div
+  1353→                      key={m.id}
+  1354→                      className={`border rounded p-2 ${
+  1355→                        isSalvage
+  1356→                          ? "bg-emerald-950/30 border-emerald-900/50"
+  1357→                          : "bg-stone-950/50 border-stone-800"
+  1358→                      }`}
+  1359→                    >
+  1360→                      <div className="flex items-center justify-between">
+  1361→                        <div className="min-w-0">
+  1362→                          <div className="flex items-center gap-1">
+  1363→                            {isSalvage ? (
+  1364→                              <Hammer className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+  1365→                            ) : (
+  1366→                              <Target className="w-3 h-3 text-amber-400 flex-shrink-0" />
+  1367→                            )}
+  1368→                            <div
+  1369→                              className={`text-xs font-medium truncate ${
+  1370→                                isSalvage
+  1371→                                  ? "text-emerald-200"
+  1372→                                  : "text-amber-200"
+  1373→                              }`}
+  1374→                            >
+  1375→                              {team?.name}
+  1376→                            </div>
+  1377→                          </div>
+  1378→                          <div className="text-[10px] text-stone-400 ml-4">
+  1379→                            {isSalvage ? "Salvaging" : "Scouting"} →{" "}
+  1380→                            {loc?.name}
+  1381→                          </div>
+  1382→                          <div className="text-[10px] text-stone-500 ml-4">
+  1383→                            {teamSurvivors.length} survivor
+  1384→                            {teamSurvivors.length !== 1 ? "s" : ""}
+  1385→                          </div>
+  1386→                        </div>
+  1387→                        <Button
+  1388→                          size="icon"
+  1389→                          variant="ghost"
+  1390→                          className="h-6 w-6 text-stone-500 hover:text-red-400"
+  1391→                          onClick={() => handleClearMission(m.teamId)}
+  1392→                        >
+  1393→                          <Trash2 className="w-3 h-3" />
+  1394→                        </Button>
+  1395→                      </div>
+  1396→                    </div>
+  1397→                  );
+  1398→                })}
+  1399→              </div>
+  1400→            </ScrollArea>
+  1401→          )}
+  1402→        </Card>
+  1403→
+  1404→        {/* Quick team creation */}
+  1405→        {teams.length === 0 && (
+  1406→          <Card className="bg-stone-900/60 border-stone-800 p-3">
+  1407→            <div className="text-xs text-stone-400 mb-2">
+  1408→              You don&apos;t have any teams yet. Create one to send survivors on
+  1409→              missions.
+  1410→            </div>
+  1411→            <Button
+  1412→              size="sm"
+  1413→              variant="outline"
+  1414→              className="w-full border-amber-800 bg-amber-950/40 text-amber-200 hover:bg-amber-900/50"
+  1415→              onClick={() => createTeam("Alpha")}
+  1416→            >
+  1417→              <Crosshair className="w-3 h-3 mr-1" />
+  1418→              Create Team Alpha
+  1419→            </Button>
+  1420→          </Card>
+  1421→        )}
+  1422→      </div>
+  1423→    </div>
+  1424→  );
+  1425→}
+  1426→

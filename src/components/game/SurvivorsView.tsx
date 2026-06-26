@@ -1,13 +1,12 @@
 "use client";
 
-import { useGameStore, selectSurvivorCapacity, selectTeamSize } from "@/game/store";
+import { useGameStore, selectSurvivorCapacity } from "@/game/store";
 import { getMaxTeamSize } from "@/game/data";
 import { Survivor, SurvivorStatus } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { CharacterIcon } from "./CharacterIcon";
 import {
   Heart,
@@ -25,6 +24,8 @@ import {
   ArrowRight,
   X,
   Wand2,
+  AlertCircle,
+  MapPin,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -36,19 +37,13 @@ const STATUS_LABELS: Record<SurvivorStatus, { label: string; color: string }> = 
 };
 
 export function SurvivorsView() {
-  const survivors = useGameStore((s) => s.survivors);
-  const teams = useGameStore((s) => s.teams);
-  const buildings = useGameStore((s) => s.buildings);
+  const area = useGameStore((s) => s.areas[s.currentAreaId]);
+  const allSurvivors = useGameStore((s) => s.survivors);
   const createTeam = useGameStore((s) => s.createTeam);
   const deleteTeam = useGameStore((s) => s.deleteTeam);
   const assignSurvivorToTeam = useGameStore((s) => s.assignSurvivorToTeam);
   const unassignSurvivorFromTeam = useGameStore((s) => s.unassignSurvivorFromTeam);
   const setSurvivorResting = useGameStore((s) => s.setSurvivorResting);
-
-  const capacity = selectSurvivorCapacity(useGameStore.getState());
-  const maxTeamSize = getMaxTeamSize(buildings.barracks.level);
-  // Match store logic: allow up to survivor count, min 3.
-  const maxTeams = Math.max(3, survivors.length);
 
   const [selectedSurvivorId, setSelectedSurvivorId] = useState<string | null>(
     null
@@ -57,9 +52,23 @@ export function SurvivorsView() {
     null
   );
 
-  const selectedSurvivor = survivors.find((s) => s.id === selectedSurvivorId);
+  if (!area) return null;
 
-  const idleSurvivors = survivors.filter((s) => s.role === "idle" || s.role === "resting");
+  const buildings = area.buildings;
+  const teams = area.teams;
+  const survivors: Survivor[] = area.survivorIds
+    .map((id) => allSurvivors[id])
+    .filter(Boolean);
+
+  const capacity = selectSurvivorCapacity(area);
+  const maxTeamSize = getMaxTeamSize(buildings.barracks.level);
+  // Match store logic: allow up to survivor count, min 3.
+  const maxTeams = Math.max(3, survivors.length);
+
+  const selectedSurvivor = survivors.find((s) => s.id === selectedSurvivorId);
+  const idleSurvivors = survivors.filter(
+    (s) => s.role === "idle" || s.role === "resting"
+  );
   const teamSurvivors = survivors.filter((s) => s.role === "working");
 
   const handleCreateTeam = () => {
@@ -67,51 +76,32 @@ export function SurvivorsView() {
     createTeam(`Team ${name}`);
   };
 
-  // Auto-assign: distribute available survivors across existing teams (filling the
-  // smallest first), and create a new team if there are leftovers and capacity allows.
+  // Auto-assign is now handled entirely by the store.
   const handleAutoAssign = () => {
-    const state = useGameStore.getState();
-    const available = state.survivors.filter(
-      (s) => s.role === "idle" || s.role === "resting"
-    );
-    if (available.length === 0) return;
-
-    // Sort teams by current size ascending so we fill the smallest first
-    let teams = [...state.teams].sort(
-      (a, b) => a.memberIds.length - b.memberIds.length
-    );
-    const maxSize = getMaxTeamSize(state.buildings.barracks.level);
-
-    let assigned = 0;
-    for (const survivor of available) {
-      // Find a team with space
-      let target = teams.find((t) => t.memberIds.length < maxSize);
-      if (!target) {
-        // Try to create a new team if possible
-        const maxTeamsCount = Math.max(3, state.survivors.length);
-        if (teams.length >= maxTeamsCount) break;
-        const newName = `Team ${String.fromCharCode(65 + teams.length)}`;
-        const newId = state.createTeam(newName);
-        if (!newId) break;
-        // Re-read teams after creation
-        const updated = useGameStore.getState().teams;
-        target = updated.find((t) => t.id === newId);
-        if (!target) break;
-        teams = [...updated].sort((a, b) => a.memberIds.length - b.memberIds.length);
-      }
-      state.assignSurvivorToTeam(survivor.id, target.id);
-      assigned++;
-      // Re-read teams to get updated member counts
-      teams = [...useGameStore.getState().teams].sort(
-        (a, b) => a.memberIds.length - b.memberIds.length
-      );
-    }
+    useGameStore.getState().autoAssignSurvivors();
   };
+
+  // No base in this area — teams can't be managed here.
+  if (!area.hasBase) {
+    return (
+      <div className="space-y-4">
+        <AreaHeader name={area.name} />
+        <Card className="bg-stone-900/60 border-stone-800 p-6 flex flex-col items-center text-center">
+          <AlertCircle className="w-8 h-8 text-amber-400 mb-2" />
+          <p className="text-sm text-stone-300 max-w-md">
+            No base in this area. Establish a base first to manage teams.
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
   const hasAvailableSurvivors = idleSurvivors.length > 0;
 
   return (
     <div className="space-y-4">
+      <AreaHeader name={area.name} />
+
       {/* Header */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-3">
@@ -350,6 +340,15 @@ export function SurvivorsView() {
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function AreaHeader({ name }: { name: string }) {
+  return (
+    <div className="flex items-center gap-2 px-1">
+      <MapPin className="w-4 h-4 text-stone-500" />
+      <h2 className="text-base font-semibold text-stone-100">{name}</h2>
     </div>
   );
 }
