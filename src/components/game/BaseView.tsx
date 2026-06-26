@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   AlertCircle,
   MapPin,
+  Wheat,
 } from "lucide-react";
 import { CharacterIcon } from "./CharacterIcon";
 
@@ -68,6 +69,11 @@ export function BaseView() {
     (s) => s.status === "injured" || s.status === "critical" || s.status === "sick"
   );
 
+  // Daily production values (shown in the summary card)
+  const farmFood = buildings.farm.level * 5;
+  const wellWater = buildings.well.level * 5;
+  const infirmaryHeal = buildings.infirmary.level * 10;
+
   return (
     <div className="space-y-4">
       <AreaHeader name={area.name} />
@@ -105,6 +111,46 @@ export function BaseView() {
           tone="ok"
         />
       </div>
+
+      {/* Daily production/consumption summary */}
+      <Card className="bg-stone-900/60 border-stone-800 p-3">
+        <div className="text-xs uppercase tracking-wide text-stone-500 mb-2 flex items-center gap-1.5">
+          <Wheat className="w-3.5 h-3.5 text-amber-400" />
+          Daily Production (next End Day)
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+          <div className="flex items-center justify-between bg-stone-950/40 rounded px-2 py-1">
+            <span className="text-stone-400">🍔 Food</span>
+            <span className={farmFood - survivors.length >= 0 ? "text-emerald-300" : "text-red-300"}>
+              {farmFood > 0 ? `+${farmFood}` : "+0"} {survivors.length > 0 && `− ${survivors.length}`} = {farmFood - survivors.length >= 0 ? "+" : ""}{farmFood - survivors.length}
+            </span>
+          </div>
+          <div className="flex items-center justify-between bg-stone-950/40 rounded px-2 py-1">
+            <span className="text-stone-400">💧 Water</span>
+            <span className={wellWater - survivors.length >= 0 ? "text-emerald-300" : "text-red-300"}>
+              {wellWater > 0 ? `+${wellWater}` : "+0"} {survivors.length > 0 && `− ${survivors.length}`} = {wellWater - survivors.length >= 0 ? "+" : ""}{wellWater - survivors.length}
+            </span>
+          </div>
+          <div className="flex items-center justify-between bg-stone-950/40 rounded px-2 py-1">
+            <span className="text-stone-400">💊 Medicine</span>
+            <span className="text-stone-300">
+              {infirmaryHeal > 0 ? `+${infirmaryHeal} HP/surv` : "no infirmary"}
+            </span>
+          </div>
+        </div>
+        {(farmFood - survivors.length < 0 || wellWater - survivors.length < 0) && (
+          <div className="mt-2 text-[11px] text-red-400 flex items-center gap-1">
+            <AlertCircle className="w-3 h-3" />
+            Warning: production does not cover daily consumption. Survivors will go hungry/thirsty.
+          </div>
+        )}
+        {farmFood === 0 && wellWater === 0 && (
+          <div className="mt-2 text-[11px] text-amber-400 flex items-center gap-1">
+            <AlertCircle className="w-3 h-3" />
+            No production buildings yet. Build a Farm and Well to produce food and water each day.
+          </div>
+        )}
+      </Card>
 
       {/* Buildings list */}
       <div>

@@ -854,6 +854,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     const newBuildings = initialBuildings();
     const areas = updateArea(state, areaId, (a) => {
+      // Ensure the area is marked discovered (defensive — should already be true
+      // since you can only claim a cleared location in a discovered area).
+      a.discovered = true;
       a.hasBase = true;
       a.baseLocationId = locationId;
       a.buildings = newBuildings;
