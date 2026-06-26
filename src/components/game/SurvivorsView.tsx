@@ -72,8 +72,15 @@ export function SurvivorsView() {
   const maxTeams = Math.max(3, survivors.length);
 
   // --- Sort survivors: unassigned first, then grouped by team ---
+  // A survivor is "unassigned" only if they're NOT in any team's memberIds,
+  // regardless of their role field. This prevents a survivor from appearing
+  // both in the unassigned list AND inside a team group (e.g. if role and
+  // memberIds get out of sync).
+  const allTeamMemberIds = new Set(
+    teams.flatMap((t) => t.memberIds)
+  );
   const unassigned = survivors.filter(
-    (s) => s.role === "idle" || s.role === "resting"
+    (s) => !allTeamMemberIds.has(s.id)
   );
   const teamGroups = teams.map((team) => ({
     team,
@@ -429,7 +436,7 @@ function SurvivorRow({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-6 text-[10px] border-stone-700 text-stone-300 hover:bg-stone-800"
+                className="h-6 text-[10px] border-amber-600 bg-amber-900/30 text-amber-200 hover:bg-amber-800/50"
                 onClick={onNewGroup}
               >
                 <UserPlus className="w-3 h-3 mr-0.5" />
