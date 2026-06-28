@@ -38,8 +38,225 @@ import {
 } from "./worldGen";
 
 // ---------- Helpers ----------
-function emptyResources(): Resources {
-  return { food: 0, water: 0, materials: 0, medicine: 0, fuel: 0, ammo: 0 };
+function getPendingMissionSurvivorIds(area: Area): Set<string> {
+  const ids = new Set<string>();
+  for (const m of area.missions) {
+    if (m.status === "pending") {
+      for (const id of m.team) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+export function isSurvivorAvailableForDispatch(
+  area: Area,
+  survivor: Survivor,
+  pendingIds?: Set<string>
+): boolean {
+  if (!area.survivorIds.includes(survivor.id)) return false;
+  if (survivor.health < 30) return false;
+  if (survivor.role === "resting" || survivor.role === "onMission") return false;
+  const pending = pendingIds ?? getPendingMissionSurvivorIds(area);
+  return !pending.has(survivor.id);
+}
+
+function locationHasPendingMission(area: Area, locationId: string): boolean {
+  return area.missions.some(
+    (m) => m.locationId === locationId && m.status === "pending"
+  );
+}
+
+function setSurvivorsOnMission(
+  survivors: Record<string, Survivor>,
+  survivorIds: string[]
+): Record<string, Survivor> {
+  const out = { ...survivors };
+  for (const id of survivorIds) {
+    const s = out[id];
+    if (s) out[id] = { ...s, role: "onMission" };
+  }
+  return out;
+}
+
+function locationNeedsWork(area: Area, location: GameLocation): boolean {
+  if (area.baseLocationId === location.id) return false;
+  if (!location.cleared) return true;
+  return !location.salvageDepleted;
+}
+
+/** Cleared locations that still have salvage — auto-dispatch targets these only. */
+function locationsNeedingSalvage(area: Area): GameLocation[] {
+  return area.locations.filter(
+    (loc) =>
+      area.baseLocationId !== loc.id &&
+      loc.cleared &&
+      !loc.salvageDepleted
+  );
+}
+
+function locationsNeedingWork(area: Area): GameLocation[] {
+  return area.locations
+    .filter((loc) => locationNeedsWork(area, loc))
+    .sort((a, b) => {
+      if (!a.cleared && b.cleared) return -1;
+      if (a.cleared && !b.cleared) return 1;
+      if (!a.cleared && !b.cleared) return a.dangerLevel - b.dangerLevel;
+      return 0;
+    });
+}
+
+function findOrCreateMissionTeam(
+  area: Area,
+  survivorCount: number
+): Team | null {
+  const maxTeamSize = getMaxTeamSize(area.buildings.barracks.level);
+  const maxTeams = Math.max(3, area.survivorIds.length);
+
+  const reusable = area.teams.find(
+    (t) =>
+      t.memberIds.length === 0 &&
+      !area.missions.some((m) => m.teamId === t.id && m.status === "pending")
+  );
+  if (reusable) return reusable;
+
+  if (area.teams.length < maxTeams) {
+    return {
+      id: `team_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      name: `Team ${String.fromCharCode(65 + area.teams.length)}`,
+      memberIds: [],
+      locationId: null,
+    };
+  }
+
+  return (
+    area.teams.find(
+      (t) =>
+        t.memberIds.length + survivorCount <= maxTeamSize &&
+        !area.missions.some((m) => m.teamId === t.id && m.status === "pending")
+    ) ?? null
+  );
+}
+
+function assignSurvivorToTeamInArea(
+  area: Area,
+  allSurvivors: Record<string, Survivor>,
+  survivorId: string,
+  teamId: string
+): boolean {
+  const team = area.teams.find((t) => t.id === teamId);
+  const survivor = allSurvivors[survivorId];
+  if (!team || !survivor) return false;
+  if (survivor.health < 30) return false;
+  if (team.memberIds.includes(survivorId)) return false;
+  const maxSize = getMaxTeamSize(area.buildings.barracks.level);
+  if (team.memberIds.length >= maxSize) return false;
+
+  survivor.assignedTeamId = teamId;
+  survivor.role = "working";
+  area.teams = area.teams.map((t) => ({
+    ...t,
+    memberIds: [
+      ...t.memberIds.filter((id) => id !== survivorId),
+      ...(t.id === teamId ? [survivorId] : []),
+    ],
+  }));
+  return true;
+}
+
+function dispatchSurvivorsToLocationInArea(
+  area: Area,
+  allSurvivors: Record<string, Survivor>,
+  survivorIds: string[],
+  locationId: string
+): boolean {
+  const location = area.locations.find((l) => l.id === locationId);
+  if (!location || !locationNeedsWork(area, location)) return false;
+  if (locationHasPendingMission(area, locationId)) return false;
+
+  const pendingMissionSurvivors = getPendingMissionSurvivorIds(area);
+  const validSurvivors = survivorIds.filter((id) => {
+    const s = allSurvivors[id];
+    return (
+      s && isSurvivorAvailableForDispatch(area, s, pendingMissionSurvivors)
+    );
+  });
+  if (validSurvivors.length === 0) return false;
+
+  let team = findOrCreateMissionTeam(area, validSurvivors.length);
+  if (!team) return false;
+
+  const teamExists = area.teams.some((t) => t.id === team!.id);
+  if (!teamExists) {
+    area.teams = [...area.teams, team];
+  }
+
+  for (const sid of validSurvivors) {
+    if (!assignSurvivorToTeamInArea(area, allSurvivors, sid, team.id)) {
+      return false;
+    }
+  }
+
+  const updatedTeam = area.teams.find((t) => t.id === team!.id);
+  if (!updatedTeam || updatedTeam.memberIds.length === 0) return false;
+
+  const isSalvage = location.cleared && !location.salvageDepleted;
+  const mission: Mission = {
+    id: `${isSalvage ? "salvage" : "mission"}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    teamId: updatedTeam.id,
+    team: [...updatedTeam.memberIds],
+    locationId,
+    status: "pending",
+    missionType: isSalvage ? "salvage" : "scout",
+  };
+
+  area.teams = area.teams.map((t) =>
+    t.id === updatedTeam.id ? { ...t, locationId } : t
+  );
+  area.missions = [...area.missions, mission];
+
+  for (const id of updatedTeam.memberIds) {
+    const s = allSurvivors[id];
+    if (s) s.role = "onMission";
+  }
+
+  return true;
+}
+
+function autoDispatchIdleSurvivors(
+  area: Area,
+  allSurvivors: Record<string, Survivor>,
+  day: number,
+  newLog: GameLogEntry[]
+): void {
+  for (const location of locationsNeedingSalvage(area)) {
+    if (locationHasPendingMission(area, location.id)) continue;
+
+    const pendingIds = getPendingMissionSurvivorIds(area);
+    const available = area.survivorIds
+      .map((id) => allSurvivors[id])
+      .filter(
+        (s): s is Survivor =>
+          s !== undefined && isSurvivorAvailableForDispatch(area, s, pendingIds)
+      );
+
+    if (available.length === 0) break;
+
+    const survivor = available[0];
+    const dispatched = dispatchSurvivorsToLocationInArea(
+      area,
+      allSurvivors,
+      [survivor.id],
+      location.id
+    );
+
+    if (dispatched) {
+      newLog.push({
+        day,
+        message: `[${area.name}] ${survivor.name} auto-dispatched to salvage ${location.name}.`,
+        type: "info",
+      });
+    }
+  }
 }
 
 function clampResources(res: Resources, caps: Resources): Resources {
@@ -674,6 +891,9 @@ function processArea(
     if (s.role === "onMission") s.role = "idle";
   });
 
+  // Auto-dispatch idle survivors to incomplete locations
+  autoDispatchIdleSurvivors(area, allSurvivors, day, newLog);
+
   return { survivorsDied };
 }
 
@@ -1101,6 +1321,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const location = area.locations.find((l) => l.id === locationId);
     if (!location) return;
     if (location.cleared) return; // use salvage for cleared
+    if (locationHasPendingMission(area, locationId)) return;
 
     const teamHasPending = area.missions.some(
       (m) => m.teamId === teamId && m.status === "pending"
@@ -1121,8 +1342,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       );
       a.missions = [...a.missions, mission];
     });
+    const survivors = setSurvivorsOnMission(state.survivors, team.memberIds);
     set({
       areas,
+      survivors,
       log: [
         ...state.log,
         {
@@ -1142,6 +1365,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!team || team.memberIds.length === 0) return;
     const location = area.locations.find((l) => l.id === locationId);
     if (!location || !location.cleared || location.salvageDepleted) return;
+    if (locationHasPendingMission(area, locationId)) return;
 
     const teamHasPending = area.missions.some(
       (m) => m.teamId === teamId && m.status === "pending"
@@ -1162,8 +1386,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       );
       a.missions = [...a.missions, mission];
     });
+    const survivors = setSurvivorsOnMission(state.survivors, team.memberIds);
     set({
       areas,
+      survivors,
       log: [
         ...state.log,
         {
@@ -1181,6 +1407,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!area) return;
     const team = area.teams.find((t) => t.id === teamId);
     if (!team || !team.locationId) return;
+    const survivors = { ...state.survivors };
+    team.memberIds.forEach((id) => {
+      const s = survivors[id];
+      if (s) survivors[id] = { ...s, role: "idle" };
+    });
     const areas = updateArea(state, state.currentAreaId, (a) => {
       a.missions = a.missions.filter(
         (m) => !(m.teamId === teamId && m.status === "pending")
@@ -1189,108 +1420,44 @@ export const useGameStore = create<GameStore>((set, get) => ({
         t.id === teamId ? { ...t, locationId: null } : t
       );
     });
-    set({ areas });
+    set({ areas, survivors });
   },
 
   sendSurvivorsToLocation: (survivorIds, locationId) => {
     const state = get();
-    const area = state.areas[state.currentAreaId];
-    if (!area) return;
-    if (survivorIds.length === 0) return;
-    const location = area.locations.find((l) => l.id === locationId);
-    if (!location) return;
+    const areaId = state.currentAreaId;
+    const area = state.areas[areaId];
+    if (!area || survivorIds.length === 0) return;
 
-    // Validate survivors: must be in this area and not on a mission/resting
-    const validSurvivors = survivorIds.filter((id) => {
-      const s = state.survivors[id];
-      return (
-        s &&
-        area.survivorIds.includes(id) &&
-        s.role !== "onMission" &&
-        s.health >= 30
+    const survivors = { ...state.survivors };
+    let dispatched = false;
+    const areas = updateArea(state, areaId, (a) => {
+      dispatched = dispatchSurvivorsToLocationInArea(
+        a,
+        survivors,
+        survivorIds,
+        locationId
       );
     });
-    if (validSurvivors.length === 0) return;
+    if (!dispatched) return;
 
-    // Find an existing team without a pending mission that has space, or create one.
-    // For simplicity, always create a fresh "mission team" so multiple groups can
-    // be sent to different locations in parallel.
-    const maxTeamSize = getMaxTeamSize(area.buildings.barracks.level);
-    const maxTeams = Math.max(3, area.survivorIds.length);
-    let team: Team | null = null;
+    const updatedArea = areas[areaId];
+    const location = updatedArea.locations.find((l) => l.id === locationId);
+    const team = updatedArea.missions.find((m) => m.locationId === locationId);
+    const missionType = team?.missionType ?? "scout";
 
-    // Try to reuse an empty team with no mission
-    const reusable = area.teams.find(
-      (t) =>
-        t.memberIds.length === 0 &&
-        !area.missions.some(
-          (m) => m.teamId === t.id && m.status === "pending"
-        )
-    );
-    if (reusable) {
-      team = reusable;
-    } else if (area.teams.length < maxTeams) {
-      // Create a new team
-      const name = `Team ${String.fromCharCode(65 + area.teams.length)}`;
-      const newTeam: Team = {
-        id: `team_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        name,
-        memberIds: [],
-        locationId: null,
-      };
-      team = newTeam;
-    } else {
-      // No space for a new team — find a team that has space and no mission
-      team =
-        area.teams.find(
-          (t) =>
-            t.memberIds.length + validSurvivors.length <= maxTeamSize &&
-            !area.missions.some(
-              (m) => m.teamId === t.id && m.status === "pending"
-            )
-        ) ?? null;
-    }
-
-    if (!team) return;
-
-    // Determine mission type
-    const isSalvage = location.cleared && !location.salvageDepleted;
-    if (isSalvage) {
-      // Use the existing assignTeamToSalvage flow
-      const teamId = team.id;
-      // First add the team if it's new
-      const state2 = get();
-      const area2 = state2.areas[state2.currentAreaId];
-      const teamExists = area2.teams.some((t) => t.id === teamId);
-      if (!teamExists && team) {
-        const areas = updateArea(state2, state2.currentAreaId, (a) => {
-          a.teams = [...a.teams, team!];
-        });
-        set({ areas });
-      }
-      // Assign survivors to the team
-      for (const sid of validSurvivors) {
-        get().assignSurvivorToTeam(sid, teamId);
-      }
-      // Assign to salvage
-      get().assignTeamToSalvage(teamId, locationId);
-    } else {
-      // Scout mission
-      const teamId = team.id;
-      const state2 = get();
-      const area2 = state2.areas[state2.currentAreaId];
-      const teamExists = area2.teams.some((t) => t.id === teamId);
-      if (!teamExists && team) {
-        const areas = updateArea(state2, state2.currentAreaId, (a) => {
-          a.teams = [...a.teams, team!];
-        });
-        set({ areas });
-      }
-      for (const sid of validSurvivors) {
-        get().assignSurvivorToTeam(sid, teamId);
-      }
-      get().assignTeamToLocation(teamId, locationId);
-    }
+    set({
+      areas,
+      survivors,
+      log: [
+        ...state.log,
+        {
+          day: state.day,
+          message: `[${updatedArea.name}] Survivors dispatched to ${missionType} ${location?.name ?? "location"}.`,
+          type: "info",
+        },
+      ].slice(-120),
+    });
   },
 
   setSurvivorResting: (survivorId, resting) => {

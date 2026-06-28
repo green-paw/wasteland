@@ -2,28 +2,16 @@
 
 import { Canvas, useFrame } from "@react-three/fiber";
 import { MapControls, Line, Html } from "@react-three/drei";
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { useGameStore } from "@/game/store";
+import { useGameStore, isSurvivorAvailableForDispatch } from "@/game/store";
 import { LOCATION_DEFS, ENEMY_INFO, RESOURCE_INFO } from "@/game/data";
 import { GameLocation, LocationType } from "@/game/types";
 import { Card } from "@/components/ui/card";
-import { CharacterIcon } from "./CharacterIcon";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Progress } from "@/components/ui/progress";
 import {
-  MapPin,
-  Crosshair,
-  Users,
-  Skull,
-  Package,
-  X,
-  Flag,
   Target,
   Trash2,
-  Hammer,
   Pickaxe,
   Home as HomeIcon,
 } from "lucide-react";
@@ -74,7 +62,7 @@ function Door({
 }
 
 // ---------- Low-poly terrain ----------
-function Terrain() {
+function Terrain({ onBackgroundClick }: { onBackgroundClick?: () => void }) {
   const geometry = useMemo(() => {
     const geo = new THREE.PlaneGeometry(80, 80, 40, 40);
     // subtle height variation
@@ -96,6 +84,10 @@ function Terrain() {
       rotation={[-Math.PI / 2, 0, 0]}
       position={[0, -0.1, 0]}
       receiveShadow
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onBackgroundClick?.();
+      }}
     >
       <meshStandardMaterial color="#3a4a2a" flatShading roughness={1} />
     </mesh>
@@ -718,19 +710,34 @@ function LocationBuilding({ type }: { type: LocationType }) {
 function LocationMarker({
   location,
   selected,
+  hovered,
   onClick,
+  onHoverStart,
+  onHoverEnd,
   hasMission,
   isBase,
+  canClaimBase,
+  availableSurvivorCount,
+  onScout,
+  onClaimBase,
+  onCancelMission,
 }: {
   location: GameLocation;
   selected: boolean;
+  hovered: boolean;
   onClick: () => void;
+  onHoverStart: () => void;
+  onHoverEnd: () => void;
   hasMission: boolean;
   isBase?: boolean;
+  canClaimBase?: boolean;
+  availableSurvivorCount: number;
+  onScout: () => void;
+  onClaimBase?: () => void;
+  onCancelMission?: () => void;
 }) {
   const def = LOCATION_DEFS[location.type];
   const ringRef = useRef<THREE.Mesh>(null);
-  const [hovered, setHovered] = useState(false);
 
   useFrame((state) => {
     if (ringRef.current) {
@@ -761,15 +768,16 @@ function LocationMarker({
         position={[0, 1, 0]}
         onClick={(e) => {
           e.stopPropagation();
+          onHoverEnd();
           onClick();
         }}
         onPointerOver={(e) => {
           e.stopPropagation();
-          setHovered(true);
+          onHoverStart();
           document.body.style.cursor = "pointer";
         }}
         onPointerOut={() => {
-          setHovered(false);
+          onHoverEnd();
           document.body.style.cursor = "auto";
         }}
       >
@@ -849,56 +857,137 @@ function LocationMarker({
         </>
       )}
 
-      {/* Base indicator — golden house icon floating above the claimed base */}
+      {/* Base indicator — 2D icon floating above the claimed base */}
       {isBase && (
-        <group position={[0, 4.2, 0]}>
-          {/* Pole */}
-          <mesh position={[0, -1.0, 0]}>
-            <cylinderGeometry args={[0.04, 0.04, 2.0, 6]} />
-            <meshBasicMaterial color="#1a1a1a" />
-          </mesh>
-          {/* House icon — small house floating above the base building */}
-          <group position={[0, 0.2, 0]} scale={1.1}>
-            {/* House body */}
-            <mesh position={[0, 0, 0]} castShadow>
-              <boxGeometry args={[0.5, 0.45, 0.5]} />
-              <meshStandardMaterial
-                color="#fbbf24"
-                emissive="#f59e0b"
-                emissiveIntensity={0.4}
-                flatShading
-              />
-            </mesh>
-            {/* House roof — pyramid */}
-            <mesh position={[0, 0.42, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-              <coneGeometry args={[0.42, 0.35, 4]} />
-              <meshStandardMaterial
-                color="#b45309"
-                emissive="#92400e"
-                emissiveIntensity={0.3}
-                flatShading
-              />
-            </mesh>
-            {/* House door */}
-            <mesh position={[0, -0.05, 0.26]}>
-              <planeGeometry args={[0.15, 0.25]} />
-              <meshBasicMaterial color="#451a03" side={THREE.DoubleSide} />
-            </mesh>
-          </group>
-          {/* "BASE" glow point light */}
-          <pointLight position={[0, 0.2, 0]} intensity={0.6} distance={4} color="#fbbf24" />
-        </group>
+        <Html
+          position={[0, 3.8, 0]}
+          center
+          prepend
+          zIndexRange={[40, 0]}
+          style={{ pointerEvents: "none" }}
+        >
+          <div className="flex flex-col items-center gap-0.5">
+            <div className="w-9 h-9 rounded-full bg-amber-950/90 border-2 border-amber-500 shadow-lg shadow-amber-900/50 flex items-center justify-center">
+              <HomeIcon className="w-5 h-5 text-amber-300" strokeWidth={2.25} />
+            </div>
+            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-300 bg-stone-950/80 px-1.5 py-0.5 rounded border border-amber-800/60">
+              Base
+            </span>
+          </div>
+        </Html>
       )}
 
-      {/* Hover label — fixed screen size, follows the 3D position.
-          Only shown while actively hovering (not when selected), so the
-          tooltip disappears after the player clicks the building. */}
-      {hovered && (
+      {/* Selected location panel — scout/salvage action on the map */}
+      {selected && !isBase && (
         <Html
           position={[0, 3.5, 0]}
           center
           prepend
-          zIndexRange={[100, 0]}
+          zIndexRange={[40, 0]}
+          style={{ pointerEvents: "auto" }}
+        >
+          <div
+            className="bg-stone-950/95 border border-stone-700 rounded-lg px-3 py-2.5 text-xs text-stone-100 shadow-xl min-w-[180px] max-w-[220px]"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="font-bold text-amber-100 text-sm flex items-center gap-1">
+              {def.label}
+            </div>
+            <div className="text-[11px] text-stone-400 mt-0.5 mb-2">
+              {location.cleared ? (
+                location.salvageDepleted ? (
+                  <span className="text-stone-500">Fully salvaged</span>
+                ) : (
+                  <span className="text-emerald-400">Ready to salvage</span>
+                )
+              ) : hasMission ? (
+                <span className="text-amber-400">Mission in progress</span>
+              ) : (
+                <>
+                  {ENEMY_INFO[location.enemyType].icon} {location.enemyCount}{" "}
+                  {ENEMY_INFO[location.enemyType].label}
+                </>
+              )}
+            </div>
+
+            {!location.salvageDepleted && !hasMission && (
+              <>
+                <div className="text-[10px] text-stone-500 mb-2">
+                  {availableSurvivorCount === 0
+                    ? "No survivors available"
+                    : `${availableSurvivorCount} survivor${
+                        availableSurvivorCount === 1 ? "" : "s"
+                      } ready`}
+                </div>
+                <Button
+                  size="sm"
+                  className={`w-full h-8 text-xs ${
+                    location.cleared && !location.salvageDepleted
+                      ? "bg-emerald-700 hover:bg-emerald-600 text-emerald-50"
+                      : "bg-amber-700 hover:bg-amber-600 text-amber-50"
+                  }`}
+                  disabled={availableSurvivorCount === 0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onScout();
+                  }}
+                >
+                  {location.cleared && !location.salvageDepleted ? (
+                    <>
+                      <Pickaxe className="w-3 h-3 mr-1" />
+                      Salvage ({availableSurvivorCount})
+                    </>
+                  ) : (
+                    <>
+                      <Target className="w-3 h-3 mr-1" />
+                      Scout ({availableSurvivorCount})
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
+
+            {hasMission && onCancelMission && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full h-8 text-xs border-stone-600 text-stone-300 hover:text-red-300 hover:border-red-800"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCancelMission();
+                }}
+              >
+                <Trash2 className="w-3 h-3 mr-1" />
+                Cancel Mission
+              </Button>
+            )}
+
+            {canClaimBase && onClaimBase && (
+              <Button
+                size="sm"
+                className="w-full h-8 text-xs mt-2 bg-amber-700 hover:bg-amber-600 text-amber-50"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClaimBase();
+                }}
+              >
+                <HomeIcon className="w-3 h-3 mr-1" />
+                Claim as Base
+              </Button>
+            )}
+          </div>
+        </Html>
+      )}
+
+      {/* Hover label — fixed screen size, follows the 3D position.
+          Only shown while actively hovering (not when selected). */}
+      {hovered && !selected && (
+        <Html
+          position={[0, 3.5, 0]}
+          center
+          prepend
+          zIndexRange={[40, 0]}
           style={{ pointerEvents: "none" }}
         >
           <div className="bg-stone-950/95 border border-stone-700 rounded px-3 py-2 text-xs text-stone-100 whitespace-nowrap shadow-xl">
@@ -1035,10 +1124,26 @@ function MissionLines() {
 // ---------- 3D Scene ----------
 function Scene({
   selectedLocationId,
+  hoveredLocationId,
   onSelectLocation,
+  onHoverLocation,
+  onDismissPopups,
+  availableSurvivorCount,
+  areaHasBase,
+  onScoutLocation,
+  onClaimBase,
+  onCancelMission,
 }: {
   selectedLocationId: string | null;
+  hoveredLocationId: string | null;
   onSelectLocation: (id: string | null) => void;
+  onHoverLocation: (id: string | null) => void;
+  onDismissPopups: () => void;
+  availableSurvivorCount: number;
+  areaHasBase: boolean;
+  onScoutLocation: (locationId: string) => void;
+  onClaimBase: (locationId: string) => void;
+  onCancelMission: (locationId: string) => void;
 }) {
   const area = useGameStore((s) => s.areas[s.currentAreaId]);
   const locations = area?.locations ?? [];
@@ -1058,7 +1163,7 @@ function Scene({
       />
       <hemisphereLight args={["#9a8a6a", "#2a2a1a", 0.4]} />
 
-      <Terrain />
+      <Terrain onBackgroundClick={onDismissPopups} />
       {/* Show a small camp tent while no base is claimed; once a location is
           claimed as base, it becomes the base (marked with a house icon in
           its LocationMarker) and the tent disappears. */}
@@ -1073,13 +1178,26 @@ function Scene({
             key={loc.id}
             location={loc}
             selected={selectedLocationId === loc.id}
+            hovered={hoveredLocationId === loc.id}
             hasMission={hasMission}
             isBase={area?.baseLocationId === loc.id}
-            onClick={() =>
+            canClaimBase={!areaHasBase && loc.cleared && area?.baseLocationId !== loc.id}
+            availableSurvivorCount={availableSurvivorCount}
+            onHoverStart={() => onHoverLocation(loc.id)}
+            onHoverEnd={() => {
+              if (hoveredLocationId === loc.id) onHoverLocation(null);
+            }}
+            onScout={() => onScoutLocation(loc.id)}
+            onClaimBase={() => onClaimBase(loc.id)}
+            onCancelMission={
+              hasMission ? () => onCancelMission(loc.id) : undefined
+            }
+            onClick={() => {
+              onHoverLocation(null);
               onSelectLocation(
                 selectedLocationId === loc.id ? null : loc.id
-              )
-            }
+              );
+            }}
           />
         );
       })}
@@ -1109,8 +1227,6 @@ export function AreaMapView() {
     (s) => s.sendSurvivorsToLocation
   );
 
-  const locations = area?.locations ?? [];
-  const teams = area?.teams ?? [];
   const missions = area?.missions ?? [];
   const survivors = (area?.survivorIds ?? [])
     .map((id) => allSurvivors[id])
@@ -1119,445 +1235,87 @@ export function AreaMapView() {
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(
     null
   );
-  // Survivors selected for dispatch (checkbox list)
-  const [selectedSurvivorIds, setSelectedSurvivorIds] = useState<string[]>([]);
-
-  const selectedLocation = locations.find((l) => l.id === selectedLocationId);
-
-  // Determine mission type based on location state
-  const isSalvageMission =
-    selectedLocation?.cleared && !selectedLocation?.salvageDepleted;
-
-  // Available survivors: in this area, not on mission, healthy enough
-  const availableSurvivors = survivors.filter(
-    (s) => s.role !== "onMission" && s.health >= 30
+  const [hoveredLocationId, setHoveredLocationId] = useState<string | null>(
+    null
   );
 
-  const handleSend = () => {
-    if (!selectedLocationId || selectedSurvivorIds.length === 0) return;
-    sendSurvivorsToLocation(selectedSurvivorIds, selectedLocationId);
-    setSelectedSurvivorIds([]);
+  const dismissPopups = () => {
+    setHoveredLocationId(null);
+    setSelectedLocationId(null);
   };
 
-  const toggleSurvivor = (id: string) => {
-    setSelectedSurvivorIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+  const availableSurvivors = survivors.filter((s) =>
+    area ? isSurvivorAvailableForDispatch(area, s) : false
+  );
+
+  const handleScoutAll = (locationId: string) => {
+    const ids = availableSurvivors.map((s) => s.id);
+    if (ids.length === 0) return;
+    sendSurvivorsToLocation(ids, locationId);
+  };
+
+  const handleClaimBase = (locationId: string) => {
+    if (!area) return;
+    claimBase(area.id, locationId);
+  };
+
+  const handleCancelMission = (locationId: string) => {
+    const mission = missions.find(
+      (m) => m.locationId === locationId && m.status === "pending"
     );
+    if (mission) clearTeamLocation(mission.teamId);
   };
-
-  const handleClearMission = (teamId: string) => {
-    clearTeamLocation(teamId);
-  };
-
-  const handleClaimBase = () => {
-    if (!selectedLocationId || !area) return;
-    if (!selectedLocation?.cleared) return;
-    claimBase(area.id, selectedLocationId);
-  };
-
-  const pendingMissions = missions.filter((m) => m.status === "pending");
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-3">
-      {/* 3D Map */}
-      <Card className="bg-stone-950 border-stone-800 overflow-hidden h-[60vh] lg:h-[75vh] relative">
-        <div className="absolute top-3 left-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-3 py-1.5">
-          <div className="text-xs text-amber-300 font-bold">
-            {area?.name ?? "Unknown Area"}
-          </div>
-          <div className="text-[10px] text-stone-500">
-            Click a location to scout • Drag to pan • Scroll to zoom
-          </div>
+    <Card className="bg-stone-950 border-stone-800 overflow-hidden h-[calc(100vh-12rem)] min-h-[480px] relative">
+      <div className="absolute top-3 left-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-3 py-1.5">
+        <div className="text-xs text-amber-300 font-bold">
+          {area?.name ?? "Unknown Area"}
         </div>
-        <div className="absolute top-3 right-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-2 py-1.5 flex items-center gap-2">
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-red-600" />
-            <span className="text-[10px] text-stone-400">Hostile</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-amber-400" />
-            <span className="text-[10px] text-stone-400">Mission</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-[10px] text-stone-400">Cleared</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-stone-500" />
-            <span className="text-[10px] text-stone-400">Depleted</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-amber-400">🏠</span>
-            <span className="text-[10px] text-stone-400">Base</span>
-          </div>
+        <div className="text-[10px] text-stone-500">
+          Click a location to scout • Drag to pan • Scroll to zoom
         </div>
-        <Canvas
-          shadows
-          camera={{ position: [0, 22, 18], fov: 45 }}
-          gl={{ antialias: false }}
-        >
-          <Scene
-            selectedLocationId={selectedLocationId}
-            onSelectLocation={setSelectedLocationId}
-          />
-        </Canvas>
-      </Card>
-
-      {/* Side panel */}
-      <div className="space-y-3">
-        {/* Selected location info */}
-        {selectedLocation ? (
-          <Card className="bg-stone-900/60 border-stone-800 p-4">
-            <div className="flex items-start justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-2xl">
-                  {LOCATION_DEFS[selectedLocation.type].icon}
-                </span>
-                <div>
-                  <div className="font-bold text-stone-100">
-                    {selectedLocation.name}
-                  </div>
-                  <div className="text-[10px] text-stone-500">
-                    {selectedLocation.cleared
-                      ? "Cleared — safe to revisit"
-                      : `${selectedLocation.distance} day travel`}
-                  </div>
-                </div>
-              </div>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-6 w-6 text-stone-500 hover:text-stone-300"
-                onClick={() => setSelectedLocationId(null)}
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-
-            <p className="text-xs text-stone-400 mb-3">
-              {LOCATION_DEFS[selectedLocation.type].description}
-            </p>
-
-            {/* Danger */}
-            <div className="space-y-2">
-              {!selectedLocation.cleared ? (
-                <div className="bg-stone-950/50 rounded p-2 border border-stone-800">
-                  <div className="flex items-center gap-1.5 text-xs text-stone-300 mb-1">
-                    <Skull className="w-3 h-3 text-red-400" />
-                    <span className="font-medium">Threat</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">
-                      {ENEMY_INFO[selectedLocation.enemyType].icon}
-                    </span>
-                    <div className="flex-1">
-                      <div className="text-sm text-stone-200">
-                        {selectedLocation.enemyCount} {ENEMY_INFO[selectedLocation.enemyType].label}
-                      </div>
-                      <div className="flex gap-0.5 mt-0.5">
-                        {[1, 2, 3, 4, 5].map((i) => (
-                          <div
-                            key={i}
-                            className={`h-1.5 flex-1 rounded-sm ${
-                              i <= selectedLocation.dangerLevel
-                                ? selectedLocation.dangerLevel >= 4
-                                  ? "bg-red-500"
-                                  : selectedLocation.dangerLevel >= 3
-                                  ? "bg-orange-500"
-                                  : "bg-amber-500"
-                                : "bg-stone-800"
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-emerald-950/30 rounded p-2 border border-emerald-900/50">
-                  <div className="text-xs text-emerald-300 flex items-center gap-1.5 mb-1">
-                    <Package className="w-3 h-3" />
-                    {selectedLocation.salvageDepleted
-                      ? "Depleted — nothing left to salvage"
-                      : "Cleared — ready to salvage ruins"}
-                  </div>
-                  {!selectedLocation.salvageDepleted &&
-                    Object.keys(selectedLocation.salvagePool).length > 0 && (
-                      <div className="mt-1.5">
-                        <div className="text-[9px] uppercase tracking-wide text-stone-500 mb-1">
-                          Salvage Pool (remaining)
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {Object.entries(selectedLocation.salvagePool).map(
-                            ([k, v]) => (
-                              <Badge
-                                key={k}
-                                variant="outline"
-                                className="text-[10px] border-emerald-800 bg-emerald-950/30 text-emerald-300"
-                              >
-                                {
-                                  RESOURCE_INFO[k as keyof typeof RESOURCE_INFO]
-                                    .icon
-                                }{" "}
-                                {v as number} {k}
-                              </Badge>
-                            )
-                          )}
-                        </div>
-                      </div>
-                    )}
-                </div>
-              )}
-
-              {/* Loot */}
-              <div className="bg-stone-950/50 rounded p-2 border border-stone-800">
-                <div className="flex items-center gap-1.5 text-xs text-stone-300 mb-1">
-                  <Package className="w-3 h-3 text-amber-400" />
-                  <span className="font-medium">Expected Loot</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {Object.entries(selectedLocation.loot).map(([k, v]) => (
-                    <Badge
-                      key={k}
-                      variant="outline"
-                      className="text-[10px] border-stone-700 bg-stone-900"
-                    >
-                      {RESOURCE_INFO[k as keyof typeof RESOURCE_INFO].icon} {v} {k}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-
-              {/* Survivor chance */}
-              <div className="bg-stone-950/50 rounded p-2 border border-stone-800">
-                <div className="flex items-center gap-1.5 text-xs text-stone-300 mb-1">
-                  <Users className="w-3 h-3 text-emerald-400" />
-                  <span className="font-medium">Survivor Chance</span>
-                </div>
-                <div className="text-sm text-emerald-300">
-                  {Math.round(selectedLocation.survivorChance * 100)}%
-                  {selectedLocation.survivorChance >= 1.0 && (
-                    <span className="ml-1.5 text-[10px] text-amber-400 font-semibold">
-                      (guaranteed)
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Claim Base (if area has no base and location is cleared) */}
-            {area && !area.hasBase && selectedLocation?.cleared && (
-              <div className="mt-3 pt-3 border-t border-stone-800">
-                <div className="text-[10px] uppercase tracking-wide text-amber-500 mb-1.5 flex items-center gap-1">
-                  <HomeIcon className="w-3 h-3" />
-                  Establish Base
-                </div>
-                <div className="text-[11px] text-stone-400 mb-2 leading-snug">
-                  Claim this cleared location as your base in {area.name}. This
-                  will set up a shelter and allow you to build.
-                </div>
-                <Button
-                  size="sm"
-                  className="w-full bg-amber-700 hover:bg-amber-600 text-amber-50"
-                  onClick={handleClaimBase}
-                >
-                  <HomeIcon className="w-3 h-3 mr-1" />
-                  Claim as Base
-                </Button>
-              </div>
-            )}
-
-            {/* Send survivors — simplified: pick survivors, hit Send */}
-            <div className="mt-3 pt-3 border-t border-stone-800">
-              {isSalvageMission ? (
-                <div className="text-[10px] uppercase tracking-wide text-emerald-500 mb-1.5 flex items-center gap-1">
-                  <Pickaxe className="w-3 h-3" />
-                  Salvage Operation
-                </div>
-              ) : (
-                <div className="text-[10px] uppercase tracking-wide text-stone-500 mb-1.5">
-                  Send Survivors
-                </div>
-              )}
-
-              {availableSurvivors.length === 0 ? (
-                <div className="text-xs text-stone-500 mb-2 italic">
-                  No survivors available. They may be on a mission, resting, or
-                  too injured.
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-1 mb-2 max-h-40 overflow-y-auto">
-                    {availableSurvivors.map((s) => {
-                      const isSelected = selectedSurvivorIds.includes(s.id);
-                      const totalScavenge = selectedSurvivorIds
-                        .map((id) => allSurvivors[id])
-                        .filter(Boolean)
-                        .reduce((sum, x) => sum + x.skills.scavenging, 0);
-                      return (
-                        <button
-                          key={s.id}
-                          onClick={() => toggleSurvivor(s.id)}
-                          className={`w-full text-left p-2 rounded text-xs border transition-colors flex items-center gap-2 ${
-                            isSelected
-                              ? isSalvageMission
-                                ? "border-emerald-600 bg-emerald-950/30 text-emerald-200"
-                                : "border-amber-600 bg-amber-950/30 text-amber-200"
-                              : "border-stone-700 bg-stone-900/50 text-stone-300 hover:border-stone-600"
-                          }`}
-                        >
-                          <CharacterIcon seed={s.iconSeed} size={24} />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">{s.name}</div>
-                            <div className="text-[9px] text-stone-500">
-                              combat {s.skills.combat}
-                              {isSalvageMission && ` · scavenge ${s.skills.scavenging}`}
-                            </div>
-                          </div>
-                          <div
-                            className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${
-                              isSelected
-                                ? "bg-amber-600 border-amber-600 text-white"
-                                : "border-stone-600"
-                            }`}
-                          >
-                            {isSelected && "✓"}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {isSalvageMission && selectedSurvivorIds.length > 0 && (
-                    <div className="text-[10px] text-emerald-400 mb-2">
-                      Total scavenge skill:{" "}
-                      {selectedSurvivorIds
-                        .map((id) => allSurvivors[id])
-                        .filter(Boolean)
-                        .reduce((sum, x) => sum + x.skills.scavenging, 0)}
-                    </div>
-                  )}
-                </>
-              )}
-
-              <Button
-                size="sm"
-                className={`w-full ${
-                  isSalvageMission
-                    ? "bg-emerald-700 hover:bg-emerald-600 text-emerald-50"
-                    : "bg-amber-700 hover:bg-amber-600 text-amber-50"
-                }`}
-                disabled={
-                  selectedSurvivorIds.length === 0 || availableSurvivors.length === 0
-                }
-                onClick={handleSend}
-              >
-                {isSalvageMission ? (
-                  <>
-                    <Hammer className="w-3 h-3 mr-1" />
-                    Send {selectedSurvivorIds.length} to Salvage
-                  </>
-                ) : (
-                  <>
-                    <Target className="w-3 h-3 mr-1" />
-                    Send {selectedSurvivorIds.length} to Scout
-                  </>
-                )}
-              </Button>
-            </div>
-          </Card>
-        ) : (
-          <Card className="bg-stone-900/40 border-stone-800 border-dashed p-6 text-center">
-            <MapPin className="w-8 h-8 mx-auto text-stone-600 mb-2" />
-            <div className="text-sm text-stone-400 font-medium mb-1">
-              Select a location
-            </div>
-            <div className="text-xs text-stone-500">
-              Click any marker on the map to view details and dispatch a team.
-            </div>
-          </Card>
-        )}
-
-        {/* Pending missions list */}
-        <Card className="bg-stone-900/60 border-stone-800 p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs uppercase tracking-wide text-stone-500 flex items-center gap-1.5">
-              <Flag className="w-3 h-3" />
-              Pending Missions
-            </div>
-            <Badge
-              variant="outline"
-              className="text-[10px] border-stone-700 text-stone-400"
-            >
-              {pendingMissions.length}
-            </Badge>
-          </div>
-          {pendingMissions.length === 0 ? (
-            <div className="text-xs text-stone-500 italic py-2">
-              No teams dispatched. Click a location to send one.
-            </div>
-          ) : (
-            <ScrollArea className="max-h-48">
-              <div className="space-y-1.5 pr-2">
-                {pendingMissions.map((m) => {
-                  const team = teams.find((t) => t.id === m.teamId);
-                  const loc = locations.find((l) => l.id === m.locationId);
-                  const teamSurvivors = survivors.filter((s) =>
-                    m.team.includes(s.id)
-                  );
-                  const isSalvage = m.missionType === "salvage";
-                  return (
-                    <div
-                      key={m.id}
-                      className={`border rounded p-2 ${
-                        isSalvage
-                          ? "bg-emerald-950/30 border-emerald-900/50"
-                          : "bg-stone-950/50 border-stone-800"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1">
-                            {isSalvage ? (
-                              <Hammer className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-                            ) : (
-                              <Target className="w-3 h-3 text-amber-400 flex-shrink-0" />
-                            )}
-                            <div
-                              className={`text-xs font-medium truncate ${
-                                isSalvage
-                                  ? "text-emerald-200"
-                                  : "text-amber-200"
-                              }`}
-                            >
-                              {team?.name}
-                            </div>
-                          </div>
-                          <div className="text-[10px] text-stone-400 ml-4">
-                            {isSalvage ? "Salvaging" : "Scouting"} →{" "}
-                            {loc?.name}
-                          </div>
-                          <div className="text-[10px] text-stone-500 ml-4">
-                            {teamSurvivors.length} survivor
-                            {teamSurvivors.length !== 1 ? "s" : ""}
-                          </div>
-                        </div>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-6 w-6 text-stone-500 hover:text-red-400"
-                          onClick={() => handleClearMission(m.teamId)}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </ScrollArea>
-          )}
-        </Card>
       </div>
-    </div>
+      <div className="absolute top-3 right-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-2 py-1.5 flex items-center gap-2 flex-wrap justify-end max-w-[50%]">
+        <div className="flex items-center gap-1">
+          <div className="w-2 h-2 rounded-full bg-red-600" />
+          <span className="text-[10px] text-stone-400">Hostile</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-2 h-2 rounded-full bg-amber-400" />
+          <span className="text-[10px] text-stone-400">Mission</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-2 h-2 rounded-full bg-green-500" />
+          <span className="text-[10px] text-stone-400">Cleared</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-2 h-2 rounded-full bg-stone-500" />
+          <span className="text-[10px] text-stone-400">Depleted</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-amber-400">🏠</span>
+          <span className="text-[10px] text-stone-400">Base</span>
+        </div>
+      </div>
+      <Canvas
+        shadows
+        camera={{ position: [0, 22, 18], fov: 45 }}
+        gl={{ antialias: false }}
+      >
+        <Scene
+          selectedLocationId={selectedLocationId}
+          hoveredLocationId={hoveredLocationId}
+          onSelectLocation={setSelectedLocationId}
+          onHoverLocation={setHoveredLocationId}
+          onDismissPopups={dismissPopups}
+          availableSurvivorCount={availableSurvivors.length}
+          areaHasBase={area?.hasBase ?? false}
+          onScoutLocation={handleScoutAll}
+          onClaimBase={handleClaimBase}
+          onCancelMission={handleCancelMission}
+        />
+      </Canvas>
+    </Card>
   );
 }

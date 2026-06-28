@@ -42,7 +42,7 @@ export function TopBar() {
   const areaDef = currentArea ? AREA_TYPE_DEFS[currentArea.type] : null;
 
   return (
-    <div className="border-b border-stone-800 bg-stone-950/95 backdrop-blur sticky top-0 z-30">
+    <div className="border-b border-stone-800 bg-stone-950/95">
       {/* Top row: title + current area + day + survivors + end day */}
       <div className="flex items-center justify-between px-3 sm:px-6 py-2.5 gap-2">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
