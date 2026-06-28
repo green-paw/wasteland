@@ -193,6 +193,12 @@ interface GameStore extends GameState {
   assignTeamToSalvage: (teamId: string, locationId: string) => void;
   clearTeamLocation: (teamId: string) => void;
   autoAssignSurvivors: () => void;
+  // Simplified dispatch: send a set of survivors to a location directly.
+  // Creates/reuses a team automatically — the player never manages teams.
+  sendSurvivorsToLocation: (
+    survivorIds: string[],
+    locationId: string
+  ) => void;
 
   // survivor actions (operate on current area)
   setSurvivorResting: (survivorId: string, resting: boolean) => void;
@@ -1184,6 +1190,107 @@ export const useGameStore = create<GameStore>((set, get) => ({
       );
     });
     set({ areas });
+  },
+
+  sendSurvivorsToLocation: (survivorIds, locationId) => {
+    const state = get();
+    const area = state.areas[state.currentAreaId];
+    if (!area) return;
+    if (survivorIds.length === 0) return;
+    const location = area.locations.find((l) => l.id === locationId);
+    if (!location) return;
+
+    // Validate survivors: must be in this area and not on a mission/resting
+    const validSurvivors = survivorIds.filter((id) => {
+      const s = state.survivors[id];
+      return (
+        s &&
+        area.survivorIds.includes(id) &&
+        s.role !== "onMission" &&
+        s.health >= 30
+      );
+    });
+    if (validSurvivors.length === 0) return;
+
+    // Find an existing team without a pending mission that has space, or create one.
+    // For simplicity, always create a fresh "mission team" so multiple groups can
+    // be sent to different locations in parallel.
+    const maxTeamSize = getMaxTeamSize(area.buildings.barracks.level);
+    const maxTeams = Math.max(3, area.survivorIds.length);
+    let team: Team | null = null;
+
+    // Try to reuse an empty team with no mission
+    const reusable = area.teams.find(
+      (t) =>
+        t.memberIds.length === 0 &&
+        !area.missions.some(
+          (m) => m.teamId === t.id && m.status === "pending"
+        )
+    );
+    if (reusable) {
+      team = reusable;
+    } else if (area.teams.length < maxTeams) {
+      // Create a new team
+      const name = `Team ${String.fromCharCode(65 + area.teams.length)}`;
+      const newTeam: Team = {
+        id: `team_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        name,
+        memberIds: [],
+        locationId: null,
+      };
+      team = newTeam;
+    } else {
+      // No space for a new team — find a team that has space and no mission
+      team =
+        area.teams.find(
+          (t) =>
+            t.memberIds.length + validSurvivors.length <= maxTeamSize &&
+            !area.missions.some(
+              (m) => m.teamId === t.id && m.status === "pending"
+            )
+        ) ?? null;
+    }
+
+    if (!team) return;
+
+    // Determine mission type
+    const isSalvage = location.cleared && !location.salvageDepleted;
+    if (isSalvage) {
+      // Use the existing assignTeamToSalvage flow
+      const teamId = team.id;
+      // First add the team if it's new
+      const state2 = get();
+      const area2 = state2.areas[state2.currentAreaId];
+      const teamExists = area2.teams.some((t) => t.id === teamId);
+      if (!teamExists && team) {
+        const areas = updateArea(state2, state2.currentAreaId, (a) => {
+          a.teams = [...a.teams, team!];
+        });
+        set({ areas });
+      }
+      // Assign survivors to the team
+      for (const sid of validSurvivors) {
+        get().assignSurvivorToTeam(sid, teamId);
+      }
+      // Assign to salvage
+      get().assignTeamToSalvage(teamId, locationId);
+    } else {
+      // Scout mission
+      const teamId = team.id;
+      const state2 = get();
+      const area2 = state2.areas[state2.currentAreaId];
+      const teamExists = area2.teams.some((t) => t.id === teamId);
+      if (!teamExists && team) {
+        const areas = updateArea(state2, state2.currentAreaId, (a) => {
+          a.teams = [...a.teams, team!];
+        });
+        set({ areas });
+      }
+      for (const sid of validSurvivors) {
+        get().assignSurvivorToTeam(sid, teamId);
+      }
+      get().assignTeamToLocation(teamId, locationId);
+    }
   },
 
   setSurvivorResting: (survivorId, resting) => {
