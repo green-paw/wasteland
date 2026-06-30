@@ -29,6 +29,7 @@ import {
   LOCATION_DEFS,
 } from "./data";
 import {
+  expandWorldAroundHex,
   generateAreaLocations,
   generateSurvivor,
   generateWorld,
@@ -228,6 +229,7 @@ function autoDispatchIdleSurvivors(
   day: number,
   newLog: GameLogEntry[]
 ): void {
+  const maxTeamSize = getMaxTeamSize(area.buildings.barracks.level);
   for (const location of locationsNeedingSalvage(area)) {
     if (locationHasPendingMission(area, location.id)) continue;
 
@@ -241,18 +243,18 @@ function autoDispatchIdleSurvivors(
 
     if (available.length === 0) break;
 
-    const survivor = available[0];
+    const assigned = available.slice(0, maxTeamSize);
     const dispatched = dispatchSurvivorsToLocationInArea(
       area,
       allSurvivors,
-      [survivor.id],
+      assigned.map((s) => s.id),
       location.id
     );
 
     if (dispatched) {
       newLog.push({
         day,
-        message: `[${area.name}] ${survivor.name} auto-dispatched to salvage ${location.name}.`,
+        message: `[${area.name}] ${assigned.length} survivor(s) auto-dispatched to salvage ${location.name}.`,
         type: "info",
       });
     }
@@ -592,6 +594,10 @@ function processArea(
     type: "info",
   });
 
+  // Auto-assign salvage work only at End Day processing.
+  // These missions are resolved in the same cycle, so they don't block daytime actions.
+  autoDispatchIdleSurvivors(area, allSurvivors, day, newLog);
+
   // ---------- 1. Resolve pending missions ----------
   area.missions = area.missions.map((m) => {
     if (m.status !== "pending") return m;
@@ -681,16 +687,13 @@ function processArea(
         resources[k as ResourceType] += v as number;
       }
 
-      if (depletedThisRun) {
-        teamSurvivors.forEach((s) => {
-          s.role = "idle";
-          s.assignedTeamId = undefined;
-        });
-        const team = area.teams.find((t) => t.id === m.teamId);
-        if (team) team.locationId = null;
-        return { ...m, status: "completed" as const };
-      }
-      return m; // stays pending
+      // Salvage missions are one-cycle tasks: resolve now, then free survivors.
+      teamSurvivors.forEach((s) => {
+        s.role = "idle";
+        s.assignedTeamId = undefined;
+      });
+      area.teams = area.teams.filter((t) => t.id !== m.teamId);
+      return { ...m, status: "completed" as const };
     }
 
     // -------- Scout mission --------
@@ -714,9 +717,7 @@ function processArea(
         updated.assignedTeamId = undefined;
       }
     });
-
-    const team = area.teams.find((t) => t.id === m.teamId);
-    if (team) team.locationId = null;
+    area.teams = area.teams.filter((t) => t.id !== m.teamId);
 
     return { ...m, status: "completed" as const, result };
   });
@@ -891,9 +892,6 @@ function processArea(
     if (s.role === "onMission") s.role = "idle";
   });
 
-  // Auto-dispatch idle survivors to incomplete locations
-  autoDispatchIdleSurvivors(area, allSurvivors, day, newLog);
-
   return { survivorsDied };
 }
 
@@ -923,6 +921,7 @@ function processTransfers(
             type: "success",
           });
         }
+        state.areas = expandWorldAroundHex(state.areas, destArea.hex);
         // Add survivors to destination area
         for (const sid of transfer.survivorIds) {
           if (!destArea.survivorIds.includes(sid)) {
@@ -984,9 +983,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   setCurrentArea: (areaId) => {
     const state = get();
-    if (state.areas[areaId] && state.areas[areaId].discovered) {
-      set({ currentAreaId: areaId });
-    }
+    const area = state.areas[areaId];
+    if (!area || !area.discovered) return;
+    const areas = expandWorldAroundHex(state.areas, area.hex);
+    set({ currentAreaId: areaId, areas });
   },
 
   travelToArea: (areaId, survivorIds) => {
@@ -1416,9 +1416,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       a.missions = a.missions.filter(
         (m) => !(m.teamId === teamId && m.status === "pending")
       );
-      a.teams = a.teams.map((t) =>
-        t.id === teamId ? { ...t, locationId: null } : t
-      );
+      a.teams = a.teams.filter((t) => t.id !== teamId);
     });
     set({ areas, survivors });
   },

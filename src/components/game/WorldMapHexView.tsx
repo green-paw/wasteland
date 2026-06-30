@@ -943,7 +943,7 @@ function ExpeditionDialog({
               <Button
                 variant="outline"
                 onClick={handleClose}
-                className="border-stone-700 text-stone-300 hover:bg-stone-800"
+                className="border-stone-700 bg-white text-black hover:bg-stone-200 hover:text-black"
               >
                 Cancel
               </Button>

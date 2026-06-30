@@ -46,6 +46,7 @@ export function BaseView() {
   const survivors: Survivor[] = area.survivorIds
     .map((id) => allSurvivors[id])
     .filter(Boolean);
+  const pendingMissions = area.missions.filter((m) => m.status === "pending");
 
   const capacity = selectSurvivorCapacity(area);
 
@@ -325,7 +326,27 @@ export function BaseView() {
             </p>
           </Card>
         ) : (
-          <Card className="bg-stone-900/60 border-stone-800 p-3">
+          <Card className="bg-stone-900/60 border-stone-800 p-3 space-y-3">
+            {pendingMissions.length > 0 && (
+              <div className="rounded border border-stone-800 bg-stone-950/40 p-2">
+                <div className="text-[10px] uppercase tracking-wide text-stone-500 mb-1.5">
+                  Pending Missions ({pendingMissions.length})
+                </div>
+                <div className="space-y-1">
+                  {pendingMissions.map((m) => {
+                    const location = area.locations.find((l) => l.id === m.locationId);
+                    return (
+                      <div key={m.id} className="text-xs text-stone-300">
+                        <span className="text-amber-300">
+                          {m.missionType === "salvage" ? "Salvage" : "Scout"}
+                        </span>{" "}
+                        {location?.name ?? "Unknown location"} ({m.team.length})
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
               {survivors.map((s) => (
                 <SurvivorMiniCard key={s.id} survivor={s} />
@@ -396,7 +417,7 @@ function SurvivorMiniCard({ survivor }: { survivor: Survivor }) {
       : survivor.role === "onMission"
       ? "On Mission"
       : survivor.role === "working"
-      ? "On Team"
+      ? "Assigned"
       : "Idle";
 
   return (

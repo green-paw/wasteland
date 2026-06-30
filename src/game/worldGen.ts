@@ -233,6 +233,62 @@ export function generateAreaLocations(
   return locations;
 }
 
+// ---------- Area shell (undiscovered hex on the world map) ----------
+function hexToAreaSeed(hex: [number, number]): number {
+  const [q, r] = hex;
+  return (((q + 8192) * 10007) ^ ((r + 8192) * 100003)) >>> 0;
+}
+
+function buildAreaShell(
+  hex: [number, number],
+  rng: () => number,
+  options?: { isStart?: boolean }
+): Area {
+  const isStart = options?.isStart ?? false;
+  const type: AreaType = isStart
+    ? pick(rng, ["farm", "village", "village", "wilderness"] as AreaType[])
+    : pick(rng, ALL_AREA_TYPES);
+  const name = `${pick(rng, AREA_NAME_PREFIXES)} ${pick(rng, AREA_NAME_SUFFIXES)}`;
+  const id = `area_${hex[0]}_${hex[1]}`;
+
+  return {
+    id,
+    name,
+    type,
+    hex,
+    discovered: false,
+    hasBase: false,
+    locations: [],
+    buildings: emptyBuildings(isStart),
+    resources: isStart ? { ...INITIAL_RESOURCES } : emptyResources(),
+    resourceCaps: { ...INITIAL_RESOURCE_CAPS },
+    teams: [],
+    missions: [],
+    survivorIds: [],
+  };
+}
+
+export function createAreaShell(hex: [number, number], seed: number): Area {
+  return buildAreaShell(hex, makeRng(seed));
+}
+
+/** Add undiscovered neighbor hexes around `centerHex` that are not in `areas` yet. */
+export function expandWorldAroundHex(
+  areas: Record<string, Area>,
+  centerHex: [number, number]
+): Record<string, Area> {
+  let hasNew = false;
+  const next = { ...areas };
+  for (const neighborHex of getNeighborHexes(centerHex)) {
+    const id = `area_${neighborHex[0]}_${neighborHex[1]}`;
+    if (!next[id]) {
+      next[id] = createAreaShell(neighborHex, hexToAreaSeed(neighborHex));
+      hasNew = true;
+    }
+  }
+  return hasNew ? next : areas;
+}
+
 // ---------- World (hex grid) Generation ----------
 // Generates the starting area (discovered) + its 6 neighbors (undiscovered, type/name only).
 export function generateWorld(seed: number): {
@@ -242,36 +298,8 @@ export function generateWorld(seed: number): {
   const rng = makeRng(seed);
   const areas: Record<string, Area> = {};
 
-  // Helper to create an area shell (no locations yet — discovered=false)
-  const makeAreaShell = (hex: [number, number]): Area => {
-    // Pick an area type — bias the starting area toward safer types
-    const isStart = hex[0] === 0 && hex[1] === 0;
-    const type: AreaType = isStart
-      ? pick(rng, ["farm", "village", "village", "wilderness"] as AreaType[])
-      : pick(rng, ALL_AREA_TYPES);
-    const def = AREA_TYPE_DEFS[type];
-    const name = `${pick(rng, AREA_NAME_PREFIXES)} ${pick(rng, AREA_NAME_SUFFIXES)}`;
-    const id = `area_${hex[0]}_${hex[1]}`;
-
-    return {
-      id,
-      name,
-      type,
-      hex,
-      discovered: false,
-      hasBase: false,
-      locations: [],
-      buildings: emptyBuildings(isStart),
-      resources: isStart ? { ...INITIAL_RESOURCES } : emptyResources(),
-      resourceCaps: { ...INITIAL_RESOURCE_CAPS },
-      teams: [],
-      missions: [],
-      survivorIds: [],
-    };
-  };
-
   // Start area at (0,0)
-  const startArea = makeAreaShell([0, 0]);
+  const startArea = buildAreaShell([0, 0], rng, { isStart: true });
   startArea.discovered = true;
   // NOTE: hasBase stays false — the player must clear a location and claim it.
   // The starting area gets guaranteed 1 easy location (1 enemy) via isStart.
@@ -287,7 +315,7 @@ export function generateWorld(seed: number): {
 
   // 6 neighbors — only type/name known (undiscovered)
   for (const neighborHex of getNeighborHexes([0, 0])) {
-    const area = makeAreaShell(neighborHex);
+    const area = buildAreaShell(neighborHex, rng);
     areas[area.id] = area;
   }
 

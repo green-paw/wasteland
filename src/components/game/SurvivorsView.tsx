@@ -1,22 +1,11 @@
 "use client";
 
 import { useGameStore, selectSurvivorCapacity } from "@/game/store";
-import { getMaxTeamSize } from "@/game/data";
-import { Survivor, SurvivorStatus, Team } from "@/game/types";
+import { Survivor, SurvivorStatus } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { CharacterIcon } from "./CharacterIcon";
 import {
   Heart,
@@ -28,13 +17,9 @@ import {
   Stethoscope,
   Wrench,
   Bed,
-  UserPlus,
-  Trash2,
   X,
-  Wand2,
   AlertCircle,
   MapPin,
-  ArrowRight,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -48,93 +33,25 @@ const STATUS_LABELS: Record<SurvivorStatus, { label: string; color: string }> = 
 export function SurvivorsView() {
   const area = useGameStore((s) => s.areas[s.currentAreaId]);
   const allSurvivors = useGameStore((s) => s.survivors);
-  const createTeam = useGameStore((s) => s.createTeam);
-  const deleteTeam = useGameStore((s) => s.deleteTeam);
-  const assignSurvivorToTeam = useGameStore((s) => s.assignSurvivorToTeam);
-  const unassignSurvivorFromTeam = useGameStore((s) => s.unassignSurvivorFromTeam);
   const setSurvivorResting = useGameStore((s) => s.setSurvivorResting);
 
   const [selectedSurvivorId, setSelectedSurvivorId] = useState<string | null>(
     null
   );
-  const [deleteTeamId, setDeleteTeamId] = useState<string | null>(null);
 
   if (!area) return null;
 
-  const buildings = area.buildings;
-  const teams: Team[] = area.teams;
   const survivors: Survivor[] = area.survivorIds
     .map((id) => allSurvivors[id])
     .filter(Boolean);
 
   const capacity = selectSurvivorCapacity(area);
-  const maxTeamSize = getMaxTeamSize(buildings.barracks.level);
-  const maxTeams = Math.max(3, survivors.length);
-
-  // --- Sort survivors: unassigned first, then grouped by team ---
-  // A survivor is "unassigned" only if they're NOT in any team's memberIds,
-  // regardless of their role field. This prevents a survivor from appearing
-  // both in the unassigned list AND inside a team group (e.g. if role and
-  // memberIds get out of sync).
-  const allTeamMemberIds = new Set(
-    teams.flatMap((t) => t.memberIds)
-  );
-  const unassigned = survivors.filter(
-    (s) => !allTeamMemberIds.has(s.id)
-  );
-  const teamGroups = teams.map((team) => ({
-    team,
-    members: team.memberIds
-      .map((id) => allSurvivors[id])
-      .filter((s): s is Survivor => Boolean(s)),
-  }));
-
-  // First team that has space (for the "assign to group A" quick button)
-  const firstTeamWithSpace = teams.find((t) => t.memberIds.length < maxTeamSize);
+  const idleCount = survivors.filter((s) => s.role === "idle").length;
+  const missionCount = survivors.filter((s) => s.role === "onMission").length;
+  const restingCount = survivors.filter((s) => s.role === "resting").length;
+  const pendingMissions = area.missions.filter((m) => m.status === "pending");
 
   const selectedSurvivor = survivors.find((s) => s.id === selectedSurvivorId);
-
-  // Team being deleted (for confirm dialog)
-  const teamToDelete = deleteTeamId
-    ? teams.find((t) => t.id === deleteTeamId)
-    : null;
-  const teamHasMission = teamToDelete
-    ? area.missions.some(
-        (m) => m.teamId === teamToDelete.id && m.status === "pending"
-      )
-    : false;
-
-  const handleQuickAssign = (survivorId: string) => {
-    let target = firstTeamWithSpace;
-    if (!target) {
-      // No team with space — create a new one
-      if (teams.length >= maxTeams) return;
-      const name = `Team ${String.fromCharCode(65 + teams.length)}`;
-      const newId = createTeam(name);
-      if (!newId) return;
-      target = useGameStore.getState().areas[area.id].teams.find(
-        (t) => t.id === newId
-      );
-    }
-    if (target) {
-      assignSurvivorToTeam(survivorId, target.id);
-    }
-  };
-
-  const handleNewGroupAndAssign = (survivorId: string) => {
-    if (teams.length >= maxTeams) return;
-    const name = `Team ${String.fromCharCode(65 + teams.length)}`;
-    const newId = createTeam(name);
-    if (!newId) return;
-    assignSurvivorToTeam(survivorId, newId);
-  };
-
-  const handleConfirmDelete = () => {
-    if (deleteTeamId) {
-      deleteTeam(deleteTeamId);
-      setDeleteTeamId(null);
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -144,9 +61,8 @@ export function SurvivorsView() {
         <Card className="bg-amber-950/30 border-amber-900/50 p-3 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
           <p className="text-xs text-amber-200">
-            No base established in this area. You can still form teams and scout
-            locations — clear one and claim it as your base to unlock building
-            and production.
+            No base established in this area. You can still scout locations.
+            Clear one and claim it as your base to unlock building and production.
           </p>
         </Card>
       )}
@@ -160,129 +76,65 @@ export function SurvivorsView() {
             </span>{" "}
             / {capacity} survivors
           </div>
-          <Badge variant="outline" className="border-stone-700 text-stone-400">
-            Max team size: {maxTeamSize}
-          </Badge>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {unassigned.length > 0 && (
-            <Button
-              size="sm"
-              onClick={() => useGameStore.getState().autoAssignSurvivors()}
-              variant="outline"
-              className="border-emerald-800 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/50"
-            >
-              <Wand2 className="w-4 h-4 mr-1" />
-              Auto-Assign
-            </Button>
-          )}
-          <Button
-            size="sm"
-            onClick={() => {
-              const name = `Team ${String.fromCharCode(65 + teams.length)}`;
-              createTeam(name);
-            }}
-            disabled={teams.length >= maxTeams}
-            className="bg-amber-700 hover:bg-amber-600 text-amber-50"
-          >
-            <UserPlus className="w-4 h-4 mr-1" />
-            New Team ({teams.length}/{maxTeams})
-          </Button>
+          <Badge variant="outline" className="border-stone-700 text-stone-400">Idle: {idleCount}</Badge>
+          <Badge variant="outline" className="border-stone-700 text-stone-400">On Mission: {missionCount}</Badge>
+          <Badge variant="outline" className="border-stone-700 text-stone-400">Resting: {restingCount}</Badge>
         </div>
       </div>
 
-      {/* Single list: unassigned first, then team groups */}
       <Card className="bg-stone-900/60 border-stone-800 p-3">
         {survivors.length === 0 ? (
           <div className="text-xs text-stone-500 italic py-3 text-center">
             No survivors in this area.
           </div>
         ) : (
-          <div className="space-y-3">
-            {/* Unassigned survivors */}
-            {unassigned.length > 0 && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wide text-stone-500 mb-1.5 flex items-center gap-1">
-                  Unassigned ({unassigned.length})
-                </div>
-                <div className="space-y-1.5">
-                  {unassigned.map((s) => (
-                    <SurvivorRow
-                      key={s.id}
-                      survivor={s}
-                      selected={selectedSurvivorId === s.id}
-                      onClick={() =>
-                        setSelectedSurvivorId(
-                          selectedSurvivorId === s.id ? null : s.id
-                        )
-                      }
-                      onRest={() =>
-                        setSurvivorResting(s.id, s.role !== "resting")
-                      }
-                      onQuickAssign={() => handleQuickAssign(s.id)}
-                      onNewGroup={() => handleNewGroupAndAssign(s.id)}
-                      canAssign={teams.length < maxTeams || Boolean(firstTeamWithSpace)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+          <div className="space-y-1.5">
+            {survivors.map((s) => (
+              <SurvivorRow
+                key={s.id}
+                survivor={s}
+                selected={selectedSurvivorId === s.id}
+                onClick={() =>
+                  setSelectedSurvivorId(
+                    selectedSurvivorId === s.id ? null : s.id
+                  )
+                }
+                onRest={() =>
+                  setSurvivorResting(s.id, s.role !== "resting")
+                }
+              />
+            ))}
+          </div>
+        )}
+      </Card>
 
-            {/* Team groups */}
-            {teamGroups.map(({ team, members }) => {
-              const teamMission = area.missions.find(
-                (m) => m.teamId === team.id && m.status === "pending"
-              );
+      <Card className="bg-stone-900/60 border-stone-800 p-3">
+        <div className="text-[10px] uppercase tracking-wide text-stone-500 mb-2">
+          Pending Missions ({pendingMissions.length})
+        </div>
+        {pendingMissions.length === 0 ? (
+          <div className="text-xs text-stone-500 italic">
+            No missions pending.
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {pendingMissions.map((m) => {
+              const location = area.locations.find((l) => l.id === m.locationId);
+              const names = m.team
+                .map((id) => allSurvivors[id]?.name)
+                .filter(Boolean)
+                .join(", ");
               return (
-                <div key={team.id}>
-                  <div className="text-[10px] uppercase tracking-wide text-amber-500 mb-1.5 flex items-center justify-between">
-                    <span className="flex items-center gap-1">
-                      <Swords className="w-3 h-3" />
-                      {team.name} ({members.length}/{maxTeamSize})
-                      {teamMission && (
-                        <Badge
-                          variant="outline"
-                          className="ml-1 text-[9px] border-amber-700 text-amber-300 bg-amber-950/40"
-                        >
-                          {teamMission.missionType === "salvage"
-                            ? "⛏ Salvaging"
-                            : "→ Scouting"}
-                        </Badge>
-                      )}
-                    </span>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-5 w-5 text-stone-500 hover:text-red-400"
-                      onClick={() => setDeleteTeamId(team.id)}
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  </div>
-                  <div className="space-y-1.5">
-                    {members.length === 0 ? (
-                      <div className="text-[10px] text-stone-600 italic py-1">
-                        Empty — assign a survivor
-                      </div>
-                    ) : (
-                      members.map((s) => (
-                        <SurvivorRow
-                          key={s.id}
-                          survivor={s}
-                          selected={selectedSurvivorId === s.id}
-                          onClick={() =>
-                            setSelectedSurvivorId(
-                              selectedSurvivorId === s.id ? null : s.id
-                            )
-                          }
-                          onRest={() =>
-                            setSurvivorResting(s.id, s.role !== "resting")
-                          }
-                          onUnassign={() => unassignSurvivorFromTeam(s.id)}
-                          teamName={team.name}
-                        />
-                      ))
-                    )}
+                <div
+                  key={m.id}
+                  className="text-xs rounded border border-stone-800 bg-stone-950/40 px-2 py-1.5 text-stone-300"
+                >
+                  <span className="text-amber-300">
+                    {m.missionType === "salvage" ? "Salvage" : "Scout"}
+                  </span>{" "}
+                  {location?.name ?? "Unknown location"}
+                  <div className="text-[10px] text-stone-500 mt-0.5">
+                    {names || "Unknown survivors"}
                   </div>
                 </div>
               );
@@ -298,42 +150,6 @@ export function SurvivorsView() {
           onClose={() => setSelectedSurvivorId(null)}
         />
       )}
-
-      {/* Delete team confirmation */}
-      <AlertDialog
-        open={deleteTeamId !== null}
-        onOpenChange={(open) => !open && setDeleteTeamId(null)}
-      >
-        <AlertDialogContent className="bg-stone-950 border-stone-800 text-stone-100">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-amber-200">
-              Delete {teamToDelete?.name}?
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-stone-400">
-              {teamHasMission ? (
-                <span className="text-amber-300">
-                  This team is currently on a mission. Deleting the team will
-                  also cancel the mission and the survivors will return to idle.
-                  Are you sure?
-                </span>
-              ) : (
-                "The team will be disbanded and all members will return to unassigned."
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="border-stone-700 text-stone-300 hover:bg-stone-800">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmDelete}
-              className="bg-red-700 hover:bg-red-600 text-red-50"
-            >
-              Delete Team
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
@@ -353,21 +169,11 @@ function SurvivorRow({
   selected,
   onClick,
   onRest,
-  onUnassign,
-  onQuickAssign,
-  onNewGroup,
-  canAssign,
-  teamName,
 }: {
   survivor: Survivor;
   selected: boolean;
   onClick: () => void;
   onRest?: () => void;
-  onUnassign?: () => void;
-  onQuickAssign?: () => void;
-  onNewGroup?: () => void;
-  canAssign?: boolean;
-  teamName?: string;
 }) {
   const status = STATUS_LABELS[survivor.status];
   const isResting = survivor.role === "resting";
@@ -407,44 +213,6 @@ function SurvivorRow({
       </div>
       {/* Action buttons */}
       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-        {onUnassign ? (
-          // In a team — show remove button
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 text-[10px] text-stone-500 hover:text-red-400"
-            onClick={onUnassign}
-          >
-            <X className="w-3 h-3 mr-0.5" />
-            Remove
-          </Button>
-        ) : (
-          // Unassigned — show quick assign + new group buttons
-          <>
-            {onQuickAssign && canAssign && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-[10px] border-amber-700 bg-amber-950/30 text-amber-200 hover:bg-amber-900/50"
-                onClick={onQuickAssign}
-              >
-                <ArrowRight className="w-3 h-3 mr-0.5" />
-                Assign
-              </Button>
-            )}
-            {onNewGroup && canAssign && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-[10px] border-amber-600 bg-amber-900/30 text-amber-200 hover:bg-amber-800/50"
-                onClick={onNewGroup}
-              >
-                <UserPlus className="w-3 h-3 mr-0.5" />
-                New
-              </Button>
-            )}
-          </>
-        )}
         {/* Rest button (always available unless on mission) */}
         {onRest && (
           <Button
@@ -503,7 +271,7 @@ function SurvivorDetailCard({
             {survivor.role === "resting"
               ? "Resting at base"
               : survivor.role === "working"
-              ? "Assigned to a team"
+              ? "Assigned"
               : survivor.role === "onMission"
               ? "Currently on a mission"
               : "Idle — ready for orders"}

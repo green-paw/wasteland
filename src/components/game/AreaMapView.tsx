@@ -5,10 +5,13 @@ import { MapControls, Line, Html } from "@react-three/drei";
 import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useGameStore, isSurvivorAvailableForDispatch } from "@/game/store";
-import { LOCATION_DEFS, ENEMY_INFO, RESOURCE_INFO } from "@/game/data";
-import { GameLocation, LocationType } from "@/game/types";
+import { getMaxTeamSize, LOCATION_DEFS, ENEMY_INFO, RESOURCE_INFO } from "@/game/data";
+import { GameLocation, LocationType, Survivor } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { CharacterIcon } from "./CharacterIcon";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Target,
   Trash2,
@@ -718,7 +721,8 @@ function LocationMarker({
   isBase,
   canClaimBase,
   availableSurvivorCount,
-  onScout,
+  onScoutAuto,
+  onOpenManualScout,
   onClaimBase,
   onCancelMission,
 }: {
@@ -732,7 +736,8 @@ function LocationMarker({
   isBase?: boolean;
   canClaimBase?: boolean;
   availableSurvivorCount: number;
-  onScout: () => void;
+  onScoutAuto: () => void;
+  onOpenManualScout: () => void;
   onClaimBase?: () => void;
   onCancelMission?: () => void;
 }) {
@@ -930,7 +935,7 @@ function LocationMarker({
                   disabled={availableSurvivorCount === 0}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onScout();
+                    onScoutAuto();
                   }}
                 >
                   {location.cleared && !location.salvageDepleted ? (
@@ -945,6 +950,18 @@ function LocationMarker({
                     </>
                   )}
                 </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-8 text-xs mt-2 border-stone-600 bg-white text-black hover:bg-stone-200 hover:text-black"
+                  disabled={availableSurvivorCount === 0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenManualScout();
+                  }}
+                >
+                  Choose Survivors
+                </Button>
               </>
             )}
 
@@ -952,7 +969,7 @@ function LocationMarker({
               <Button
                 size="sm"
                 variant="outline"
-                className="w-full h-8 text-xs border-stone-600 text-stone-300 hover:text-red-300 hover:border-red-800"
+                className="w-full h-8 text-xs border-stone-600 bg-white text-black hover:bg-stone-200 hover:text-red-700 hover:border-red-800"
                 onClick={(e) => {
                   e.stopPropagation();
                   onCancelMission();
@@ -1131,6 +1148,7 @@ function Scene({
   availableSurvivorCount,
   areaHasBase,
   onScoutLocation,
+  onOpenManualLocation,
   onClaimBase,
   onCancelMission,
 }: {
@@ -1142,6 +1160,7 @@ function Scene({
   availableSurvivorCount: number;
   areaHasBase: boolean;
   onScoutLocation: (locationId: string) => void;
+  onOpenManualLocation: (locationId: string) => void;
   onClaimBase: (locationId: string) => void;
   onCancelMission: (locationId: string) => void;
 }) {
@@ -1187,7 +1206,8 @@ function Scene({
             onHoverEnd={() => {
               if (hoveredLocationId === loc.id) onHoverLocation(null);
             }}
-            onScout={() => onScoutLocation(loc.id)}
+            onScoutAuto={() => onScoutLocation(loc.id)}
+            onOpenManualScout={() => onOpenManualLocation(loc.id)}
             onClaimBase={() => onClaimBase(loc.id)}
             onCancelMission={
               hasMission ? () => onCancelMission(loc.id) : undefined
@@ -1238,6 +1258,8 @@ export function AreaMapView() {
   const [hoveredLocationId, setHoveredLocationId] = useState<string | null>(
     null
   );
+  const [manualLocationId, setManualLocationId] = useState<string | null>(null);
+  const [manualSelectedSurvivorIds, setManualSelectedSurvivorIds] = useState<string[]>([]);
 
   const dismissPopups = () => {
     setHoveredLocationId(null);
@@ -1247,11 +1269,35 @@ export function AreaMapView() {
   const availableSurvivors = survivors.filter((s) =>
     area ? isSurvivorAvailableForDispatch(area, s) : false
   );
+  const maxTeamSize = area ? getMaxTeamSize(area.buildings.barracks.level) : 1;
+  const autoSelectedSurvivors = [...availableSurvivors]
+    .sort((a, b) => b.skills.combat - a.skills.combat)
+    .slice(0, maxTeamSize);
 
   const handleScoutAll = (locationId: string) => {
-    const ids = availableSurvivors.map((s) => s.id);
+    const ids = autoSelectedSurvivors.map((s) => s.id);
     if (ids.length === 0) return;
     sendSurvivorsToLocation(ids, locationId);
+  };
+
+  const handleOpenManual = (locationId: string) => {
+    setManualLocationId(locationId);
+    setManualSelectedSurvivorIds([]);
+  };
+
+  const toggleManualSurvivor = (id: string) => {
+    setManualSelectedSurvivorIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= maxTeamSize) return prev;
+      return [...prev, id];
+    });
+  };
+
+  const handleManualSend = () => {
+    if (!manualLocationId || manualSelectedSurvivorIds.length === 0) return;
+    sendSurvivorsToLocation(manualSelectedSurvivorIds, manualLocationId);
+    setManualSelectedSurvivorIds([]);
+    setManualLocationId(null);
   };
 
   const handleClaimBase = (locationId: string) => {
@@ -1312,10 +1358,80 @@ export function AreaMapView() {
           availableSurvivorCount={availableSurvivors.length}
           areaHasBase={area?.hasBase ?? false}
           onScoutLocation={handleScoutAll}
+          onOpenManualLocation={handleOpenManual}
           onClaimBase={handleClaimBase}
           onCancelMission={handleCancelMission}
         />
       </Canvas>
+
+      <Dialog
+        open={manualLocationId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setManualLocationId(null);
+            setManualSelectedSurvivorIds([]);
+          }
+        }}
+      >
+        <DialogContent className="bg-stone-950 border-stone-800 text-stone-100 max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select Survivors</DialogTitle>
+          </DialogHeader>
+          <div className="text-xs text-stone-400">
+            Pick up to {maxTeamSize} survivors for this mission.
+          </div>
+          <ScrollArea className="max-h-72 mt-2">
+            <div className="space-y-2 pr-2">
+              {availableSurvivors
+                .sort((a, b) => b.skills.combat - a.skills.combat)
+                .map((s: Survivor) => {
+                  const selected = manualSelectedSurvivorIds.includes(s.id);
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => toggleManualSurvivor(s.id)}
+                      className={`w-full text-left flex items-center gap-2 p-2 rounded border ${
+                        selected
+                          ? "border-amber-600 bg-amber-950/30"
+                          : "border-stone-700 bg-stone-900/40"
+                      }`}
+                    >
+                      <CharacterIcon seed={s.iconSeed} size={28} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm truncate">{s.name}</div>
+                        <div className="text-[10px] text-stone-500">
+                          Combat {s.skills.combat}
+                        </div>
+                      </div>
+                      <div className="text-xs text-stone-300">
+                        {selected ? "✓" : ""}
+                      </div>
+                    </button>
+                  );
+                })}
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              className="border-stone-700 bg-white text-black hover:bg-stone-200 hover:text-black"
+              onClick={() => {
+                setManualLocationId(null);
+                setManualSelectedSurvivorIds([]);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-amber-700 hover:bg-amber-600 text-amber-50"
+              disabled={manualSelectedSurvivorIds.length === 0}
+              onClick={handleManualSend}
+            >
+              Send ({manualSelectedSurvivorIds.length})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

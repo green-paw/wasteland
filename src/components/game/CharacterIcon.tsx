@@ -32,7 +32,8 @@ export function CharacterIcon({
   const faceIndex = pickFaceIndex(seed);
   const col = faceIndex % 8;
   const row = Math.floor(faceIndex / 8);
-  const cellSize = 64; // per-face size in the sheet
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  const sheetSrc = `${basePath}/characters-sheet.png`;
 
   return (
     <div
@@ -50,7 +51,7 @@ export function CharacterIcon({
       }}
     >
       <img
-        src="/characters-sheet.png"
+        src={sheetSrc}
         alt="Survivor face"
         width={size}
         height={size}

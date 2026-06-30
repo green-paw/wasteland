@@ -39,6 +39,7 @@ jobs:
       - name: Build static site
         env:
           NEXT_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
         run: bunx next build
 
       - name: Upload Pages artifact

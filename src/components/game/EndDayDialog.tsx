@@ -1,6 +1,7 @@
 "use client";
 
-import { useGameStore } from "@/game/store";
+import { isSurvivorAvailableForDispatch, useGameStore } from "@/game/store";
+import { BUILDING_DEFS, getMaxTeamSize, getUpgradeCost } from "@/game/data";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,7 +14,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useState } from "react";
 import { Moon, AlertCircle } from "lucide-react";
-import { GameLogEntry, Mission, Team, GameLocation } from "@/game/types";
+import { GameLogEntry, Mission, Team, GameLocation, Survivor } from "@/game/types";
 
 export function EndDayDialog({
   open,
@@ -27,6 +28,7 @@ export function EndDayDialog({
   const allSurvivors = useGameStore((s) => s.survivors);
   const transfers = useGameStore((s) => s.transfers);
   const day = useGameStore((s) => s.day);
+  const currentAreaId = useGameStore((s) => s.currentAreaId);
   const gameOver = useGameStore((s) => s.gameOver);
   const gameOverReason = useGameStore((s) => s.gameOverReason);
   const resetGame = useGameStore((s) => s.resetGame);
@@ -47,6 +49,64 @@ export function EndDayDialog({
   }
 
   const pendingTransfers = transfers.filter((t) => t.arrivalDay > day);
+  const currentArea = areas[currentAreaId];
+  const affordableBuildings: string[] = [];
+  if (currentArea?.hasBase) {
+    const workshopLevel = currentArea.buildings.workshop.level;
+    for (const [type, building] of Object.entries(currentArea.buildings)) {
+      if (building.level >= building.maxLevel) continue;
+      const cost = getUpgradeCost(type as keyof typeof currentArea.buildings, building.level, workshopLevel);
+      const canAfford = Object.entries(cost).every(
+        ([k, v]) => currentArea.resources[k as keyof typeof currentArea.resources] >= (v as number)
+      );
+      if (canAfford) {
+        affordableBuildings.push(BUILDING_DEFS[type as keyof typeof BUILDING_DEFS].label);
+      }
+    }
+  }
+  const salvagePreview: {
+    areaName: string;
+    locationName: string;
+    survivorName: string;
+  }[] = [];
+  for (const area of Object.values(areas)) {
+    const pendingAtLocation = new Set(
+      area.missions.filter((m) => m.status === "pending").map((m) => m.locationId)
+    );
+    const pendingSurvivorIds = new Set(
+      area.missions
+        .filter((m) => m.status === "pending")
+        .flatMap((m) => m.team)
+    );
+    const available = area.survivorIds
+      .map((id) => allSurvivors[id])
+      .filter(
+        (s): s is Survivor =>
+          !!s &&
+          isSurvivorAvailableForDispatch(area, s, pendingSurvivorIds)
+      );
+    const salvageTargets = area.locations.filter(
+      (l) =>
+        l.id !== area.baseLocationId &&
+        l.cleared &&
+        !l.salvageDepleted &&
+        !pendingAtLocation.has(l.id)
+    );
+    const maxTeamSize = getMaxTeamSize(area.buildings.barracks.level);
+    let cursor = 0;
+    for (const target of salvageTargets) {
+      if (cursor >= available.length) break;
+      const assigned = available.slice(cursor, cursor + maxTeamSize);
+      cursor += assigned.length;
+      for (const survivor of assigned) {
+        salvagePreview.push({
+          areaName: area.name,
+          locationName: target.name,
+          survivorName: survivor.name,
+        });
+      }
+    }
+  }
 
   const handleEndDay = async () => {
     setResolving(true);
@@ -217,19 +277,48 @@ export function EndDayDialog({
               </div>
             )}
 
+            <div className="bg-stone-900/50 border border-stone-800 rounded-md p-3">
+              <div className="text-xs uppercase tracking-wide text-stone-500 mb-2">
+                Auto-Salvage Preview ({salvagePreview.length})
+              </div>
+              {salvagePreview.length === 0 ? (
+                <div className="text-sm text-stone-500 italic">
+                  No idle survivors will be auto-assigned to salvage tonight.
+                </div>
+              ) : (
+                <div className="space-y-1 max-h-28 overflow-y-auto">
+                  {salvagePreview.map((p, idx) => (
+                    <div key={`${p.areaName}-${p.locationName}-${idx}`} className="text-sm text-stone-300">
+                      <span className="text-emerald-300">{p.survivorName}</span>{" "}
+                      → salvage <span className="text-amber-300">{p.locationName}</span>
+                      <span className="text-stone-600 text-[10px] ml-1">({p.areaName})</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="bg-stone-900/30 border border-stone-800 rounded-md p-3 text-xs text-stone-400 space-y-1">
               <div>• All areas will be processed simultaneously.</div>
-              <div>• Teams will resolve their missions.</div>
+              <div>• Pending missions will resolve.</div>
+              <div>• Idle survivors may auto-salvage cleared ruins.</div>
               <div>• In-transit transfers will arrive at their destinations.</div>
               <div>• Survivors will consume food and water.</div>
               <div>• Buildings will produce resources.</div>
+              {affordableBuildings.length > 0 && (
+                <div className="text-emerald-300">
+                  • You can build/upgrade now at {currentArea?.name}:{" "}
+                  {affordableBuildings.slice(0, 3).join(", ")}
+                  {affordableBuildings.length > 3 ? "..." : ""}.
+                </div>
+              )}
             </div>
 
             <DialogFooter>
               <Button
                 variant="outline"
                 onClick={() => onOpenChange(false)}
-                className="border-stone-700 text-stone-300 hover:bg-stone-800"
+                className="border-stone-700 bg-white text-black hover:bg-stone-200 hover:text-black"
               >
                 Cancel
               </Button>
