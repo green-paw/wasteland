@@ -20,6 +20,8 @@ import {
   AREA_TYPE_DEFS,
   BUILDING_DEFS,
   ENEMY_INFO,
+  getLocationEnemyPower,
+  getTeamCombatPower,
   getNeighborHexes,
   getSurvivorCapacity,
   getMaxTeamSize,
@@ -451,10 +453,8 @@ function resolveMission(
 
   if (!location.cleared && location.enemyCount > 0) {
     const enemyDef = ENEMY_INFO[location.enemyType];
-    const teamCombat =
-      teamSurvivors.reduce((sum, s) => sum + s.skills.combat, 0) +
-      teamSurvivors.reduce((sum, s) => sum + (s.health > 50 ? 1 : 0), 0) * 0.5;
-    const enemyPower = location.enemyCount * enemyDef.combatPower;
+    const teamCombat = getTeamCombatPower(teamSurvivors);
+    const enemyPower = getLocationEnemyPower(location);
 
     result.log.push(
       `Team encountered ${location.enemyCount} ${enemyDef.label} at ${location.name}.`

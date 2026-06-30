@@ -5,7 +5,7 @@ import { MapControls, Line, Html } from "@react-three/drei";
 import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useGameStore, isSurvivorAvailableForDispatch } from "@/game/store";
-import { getMaxTeamSize, LOCATION_DEFS, ENEMY_INFO, RESOURCE_INFO } from "@/game/data";
+import { getMaxTeamSize, LOCATION_DEFS, ENEMY_INFO, RESOURCE_INFO, getLocationEnemyPower, getTeamCombatPower } from "@/game/data";
 import { GameLocation, LocationType, Survivor, AreaType, EnemyType } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import {
   Trash2,
   Pickaxe,
   Home as HomeIcon,
+  AlertTriangle,
 } from "lucide-react";
 
 // ---------- Helper: window ----------
@@ -881,6 +882,7 @@ function LocationMarker({
   isBase,
   canClaimBase,
   availableSurvivorCount,
+  scoutTeamCombat,
   onScoutAuto,
   onOpenManualScout,
   onClaimBase,
@@ -896,6 +898,7 @@ function LocationMarker({
   isBase?: boolean;
   canClaimBase?: boolean;
   availableSurvivorCount: number;
+  scoutTeamCombat: number;
   onScoutAuto: () => void;
   onOpenManualScout: () => void;
   onClaimBase?: () => void;
@@ -903,6 +906,12 @@ function LocationMarker({
 }) {
   const def = LOCATION_DEFS[location.type];
   const ringRef = useRef<THREE.Mesh>(null);
+  const enemyPower = getLocationEnemyPower(location);
+  const enemiesTooStrong =
+    !location.cleared &&
+    location.enemyCount > 0 &&
+    availableSurvivorCount > 0 &&
+    scoutTeamCombat < enemyPower;
 
   useFrame((state) => {
     if (ringRef.current) {
@@ -1083,6 +1092,25 @@ function LocationMarker({
                 </>
               )}
             </div>
+
+            {!location.cleared && location.enemyCount > 0 && availableSurvivorCount > 0 && (
+              <div
+                className={`text-[10px] mt-1 mb-2 ${
+                  enemiesTooStrong ? "text-red-400" : "text-stone-500"
+                }`}
+              >
+                <span>
+                  Your team {scoutTeamCombat.toFixed(1)} vs enemies{" "}
+                  {enemyPower.toFixed(1)}
+                </span>
+                {enemiesTooStrong && (
+                  <span className="flex items-center gap-1 font-semibold mt-1">
+                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                    Too strong for available survivors
+                  </span>
+                )}
+              </div>
+            )}
 
             {!location.salvageDepleted && !hasMission && (
               <>
@@ -1314,6 +1342,7 @@ function Scene({
   onHoverLocation,
   onDismissPopups,
   availableSurvivorCount,
+  scoutTeamCombat,
   areaHasBase,
   onScoutLocation,
   onOpenManualLocation,
@@ -1326,6 +1355,7 @@ function Scene({
   onHoverLocation: (id: string | null) => void;
   onDismissPopups: () => void;
   availableSurvivorCount: number;
+  scoutTeamCombat: number;
   areaHasBase: boolean;
   onScoutLocation: (locationId: string) => void;
   onOpenManualLocation: (locationId: string) => void;
@@ -1385,6 +1415,7 @@ function Scene({
             isBase={area?.baseLocationId === loc.id}
             canClaimBase={!areaHasBase && loc.cleared && area?.baseLocationId !== loc.id}
             availableSurvivorCount={availableSurvivorCount}
+            scoutTeamCombat={scoutTeamCombat}
             onHoverStart={() => onHoverLocation(loc.id)}
             onHoverEnd={() => {
               if (hoveredLocationId === loc.id) onHoverLocation(null);
@@ -1456,6 +1487,7 @@ export function AreaMapView() {
   const autoSelectedSurvivors = [...availableSurvivors]
     .sort((a, b) => b.skills.combat - a.skills.combat)
     .slice(0, maxTeamSize);
+  const scoutTeamCombat = getTeamCombatPower(autoSelectedSurvivors);
 
   const handleScoutAll = (locationId: string) => {
     const ids = autoSelectedSurvivors.map((s) => s.id);
@@ -1509,6 +1541,7 @@ export function AreaMapView() {
           onHoverLocation={setHoveredLocationId}
           onDismissPopups={dismissPopups}
           availableSurvivorCount={availableSurvivors.length}
+          scoutTeamCombat={scoutTeamCombat}
           areaHasBase={area?.hasBase ?? false}
           onScoutLocation={handleScoutAll}
           onOpenManualLocation={handleOpenManual}

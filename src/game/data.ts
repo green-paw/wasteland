@@ -2,9 +2,11 @@ import {
   AreaType,
   BuildingType,
   EnemyType,
+  GameLocation,
   LocationType,
   ResourceType,
   Resources,
+  Survivor,
 } from "./types";
 
 export const RESOURCE_INFO: Record<
@@ -274,6 +276,27 @@ export const ENEMY_INFO: Record<
   raiders: { label: "Raiders", icon: "🔪", combatPower: 2.5 },
   mutants: { label: "Mutants", icon: "👹", combatPower: 3.5 },
 };
+
+export function getTeamCombatPower(survivors: Survivor[]): number {
+  return (
+    survivors.reduce((sum, s) => sum + s.skills.combat, 0) +
+    survivors.reduce((sum, s) => sum + (s.health > 50 ? 1 : 0), 0) * 0.5
+  );
+}
+
+export function getLocationEnemyPower(location: GameLocation): number {
+  if (location.cleared || location.enemyCount <= 0) return 0;
+  return location.enemyCount * ENEMY_INFO[location.enemyType].combatPower;
+}
+
+export function isLocationTooStrongForTeam(
+  location: GameLocation,
+  team: Survivor[]
+): boolean {
+  const enemyPower = getLocationEnemyPower(location);
+  if (enemyPower <= 0 || team.length === 0) return false;
+  return getTeamCombatPower(team) < enemyPower;
+}
 
 export const SURVIVOR_NAMES = [
   "Alex", "Sam", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Quinn",

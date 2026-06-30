@@ -1,6 +1,7 @@
-"""Slice the 8x8 character faces sprite sheet into individual PNGs.
-Grid: 1254x1254 image, 9px outer border, 152px cells, 3px gaps between cells.
-Cell (col, row) top-left = (9 + col*155, 9 + row*155).
+"""Deprecated — use scripts/slice-character-faces.ts instead.
+
+That script detects dark gutter lines in the source image and crops each
+face using its exact bounds (rows/columns may differ in height/width).
 """
 from PIL import Image
 import os

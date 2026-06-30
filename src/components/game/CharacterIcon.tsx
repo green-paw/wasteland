@@ -1,14 +1,12 @@
 "use client";
 
-// Character icon component using the uploaded 8x8 sprite sheet.
-// The sprite sheet is at /characters-sheet.png (512x512, 64x64 per face).
 // Each survivor picks a face by index based on their iconSeed.
+// Faces are pre-sliced from the source sheet using detected gutter boundaries
+// (see scripts/slice-character-faces.ts and public/characters-grid.json).
 
-const TOTAL_FACES = 64; // 8x8 grid
+const TOTAL_FACES = 64;
 
 function pickFaceIndex(seed: number): number {
-  // Deterministic per-seed; stable across renders.
-  // Use a simple hash to avoid clustering.
   let h = (seed ^ 0x9e3779b9) >>> 0;
   h = Math.imul(h ^ (h >>> 15), h | 1);
   h ^= h + Math.imul(h ^ (h >>> 7), h | 61);
@@ -30,10 +28,8 @@ export function CharacterIcon({
   rounded = true,
 }: CharacterIconProps) {
   const faceIndex = pickFaceIndex(seed);
-  const col = faceIndex % 8;
-  const row = Math.floor(faceIndex / 8);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-  const sheetSrc = `${basePath}/characters-sheet.png`;
+  const faceSrc = `${basePath}/characters/face_${String(faceIndex).padStart(2, "0")}.png`;
 
   return (
     <div
@@ -51,17 +47,14 @@ export function CharacterIcon({
       }}
     >
       <img
-        src={sheetSrc}
+        src={faceSrc}
         alt="Survivor face"
         width={size}
         height={size}
         style={{
-          width: size * 8,
-          height: size * 8,
-          maxWidth: "none",
+          width: size,
+          height: size,
           objectFit: "cover",
-          transform: `translate(-${col * size}px, -${row * size}px)`,
-          imageRendering: "auto",
           display: "block",
         }}
         draggable={false}
