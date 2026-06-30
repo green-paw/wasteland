@@ -105,7 +105,11 @@ function isAdjacentHex(
 }
 
 // ---------------- Main component ----------------
-export function WorldMapHexView() {
+export function WorldMapHexView({
+  onNavigateToArea,
+}: {
+  onNavigateToArea?: () => void;
+}) {
   const areas = useGameStore((s) => s.areas);
   const currentAreaId = useGameStore((s) => s.currentAreaId);
   const survivors = useGameStore((s) => s.survivors);
@@ -175,6 +179,13 @@ export function WorldMapHexView() {
     }
   };
 
+  const handleHexDoubleClick = (area: Area) => {
+    if (!area.discovered) return;
+    setSelectedAreaId(area.id);
+    useGameStore.getState().setCurrentArea(area.id);
+    onNavigateToArea?.();
+  };
+
   // Transfers as lines (only those between currently visible areas) --------
   const transferLines = transfers
     .map((t) => {
@@ -218,6 +229,7 @@ export function WorldMapHexView() {
             <span className="flex items-center gap-1">
               <Footprints className="w-3 h-3" /> In transit
             </span>
+            <span className="text-stone-600">• Double-click discovered area to open</span>
           </div>
         </CardHeader>
         <CardContent>
@@ -296,6 +308,10 @@ export function WorldMapHexView() {
                   key={area.id}
                   className="cursor-pointer"
                   onClick={() => handleHexClick(area)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    handleHexDoubleClick(area);
+                  }}
                 >
                   {/* Dashed ring on fog hexes that are expedition-eligible */}
                   {isFog && isNeighborOfCurrent && (

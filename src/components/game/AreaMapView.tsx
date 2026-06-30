@@ -6,10 +6,12 @@ import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useGameStore, isSurvivorAvailableForDispatch } from "@/game/store";
 import { getMaxTeamSize, LOCATION_DEFS, ENEMY_INFO, RESOURCE_INFO } from "@/game/data";
-import { GameLocation, LocationType, Survivor } from "@/game/types";
+import { GameLocation, LocationType, Survivor, AreaType } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CharacterIcon } from "./CharacterIcon";
+import { AreaScenery } from "./AreaScenery";
+import { buildDefaultTerrainGeometry, buildTerrainGeometry } from "./areaTerrain";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -65,21 +67,21 @@ function Door({
 }
 
 // ---------- Low-poly terrain ----------
-function Terrain({ onBackgroundClick }: { onBackgroundClick?: () => void }) {
+function Terrain({
+  onBackgroundClick,
+  areaType,
+  areaId,
+}: {
+  onBackgroundClick?: () => void;
+  areaType?: AreaType;
+  areaId?: string;
+}) {
   const geometry = useMemo(() => {
-    const geo = new THREE.PlaneGeometry(80, 80, 40, 40);
-    // subtle height variation
-    const pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const y = pos.getY(i);
-      const dist = Math.sqrt(x * x + y * y);
-      const noise = Math.sin(x * 0.3) * Math.cos(y * 0.3) * 0.3;
-      pos.setZ(i, noise + Math.sin(dist * 0.2) * 0.2);
+    if (areaType && areaId) {
+      return buildTerrainGeometry(areaType, areaId);
     }
-    geo.computeVertexNormals();
-    return geo;
-  }, []);
+    return buildDefaultTerrainGeometry();
+  }, [areaType, areaId]);
 
   return (
     <mesh
@@ -92,7 +94,7 @@ function Terrain({ onBackgroundClick }: { onBackgroundClick?: () => void }) {
         onBackgroundClick?.();
       }}
     >
-      <meshStandardMaterial color="#3a4a2a" flatShading roughness={1} />
+      <meshStandardMaterial vertexColors flatShading roughness={1} />
     </mesh>
   );
 }
@@ -1167,6 +1169,10 @@ function Scene({
   const area = useGameStore((s) => s.areas[s.currentAreaId]);
   const locations = area?.locations ?? [];
   const missions = area?.missions ?? [];
+  const locationPositions = useMemo(
+    () => locations.map((loc) => [loc.position[0], loc.position[2]] as [number, number]),
+    [locations]
+  );
 
   return (
     <>
@@ -1182,7 +1188,18 @@ function Scene({
       />
       <hemisphereLight args={["#9a8a6a", "#2a2a1a", 0.4]} />
 
-      <Terrain onBackgroundClick={onDismissPopups} />
+      <Terrain
+        onBackgroundClick={onDismissPopups}
+        areaType={area?.type}
+        areaId={area?.id}
+      />
+      {area && (
+        <AreaScenery
+          areaType={area.type}
+          areaId={area.id}
+          locationPositions={locationPositions}
+        />
+      )}
       {/* Show a small camp tent while no base is claimed; once a location is
           claimed as base, it becomes the base (marked with a house icon in
           its LocationMarker) and the tent disappears. */}

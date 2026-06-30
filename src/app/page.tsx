@@ -64,7 +64,7 @@ export default function Home() {
 
         <main className="flex-1 p-3 sm:p-4 max-w-7xl w-full mx-auto">
           <TabsContent value="world" className="mt-0">
-            <WorldMapHexView />
+            <WorldMapHexView onNavigateToArea={() => setTab("area")} />
           </TabsContent>
 
           <TabsContent value="area" className="mt-0">
