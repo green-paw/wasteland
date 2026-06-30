@@ -38,7 +38,7 @@ export function TopBar() {
   const areaDef = currentArea ? AREA_TYPE_DEFS[currentArea.type] : null;
 
   return (
-    <div className="border-b border-stone-800 bg-stone-950/95 px-3 sm:px-4 py-2">
+    <div className="px-3 sm:px-4 py-2 max-w-7xl w-full mx-auto">
       <div className="flex items-center justify-between gap-2 sm:gap-3 min-w-0">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0 overflow-x-auto">
           {currentArea && areaDef ? (
