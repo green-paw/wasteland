@@ -30,7 +30,12 @@ export type LocationType =
   | "pharmacy";
 
 export type SurvivorStatus = "healthy" | "injured" | "sick" | "critical";
-export type SurvivorRole = "idle" | "resting" | "onMission" | "working";
+export type SurvivorRole =
+  | "idle"
+  | "resting"
+  | "onMission"
+  | "working"
+  | "guarding";
 
 export interface Skills {
   combat: number;

@@ -277,8 +277,14 @@ function BaseBuildings() {
 }
 
 // ---------- Location building models (detailed) ----------
-function LocationBuilding({ type }: { type: LocationType }) {
-  const color = LOCATION_DEFS[type].color;
+function LocationBuilding({
+  type,
+  depleted = false,
+}: {
+  type: LocationType;
+  depleted?: boolean;
+}) {
+  const color = depleted ? "#6b7280" : LOCATION_DEFS[type].color;
   switch (type) {
     case "abandoned_house":
       return (
@@ -882,7 +888,7 @@ function LocationMarker({
   isBase,
   canClaimBase,
   availableSurvivorCount,
-  scoutTeamCombat,
+  teamCombat,
   onScoutAuto,
   onOpenManualScout,
   onClaimBase,
@@ -898,7 +904,7 @@ function LocationMarker({
   isBase?: boolean;
   canClaimBase?: boolean;
   availableSurvivorCount: number;
-  scoutTeamCombat: number;
+  teamCombat: number;
   onScoutAuto: () => void;
   onOpenManualScout: () => void;
   onClaimBase?: () => void;
@@ -907,11 +913,12 @@ function LocationMarker({
   const def = LOCATION_DEFS[location.type];
   const ringRef = useRef<THREE.Mesh>(null);
   const enemyPower = getLocationEnemyPower(location);
-  const enemiesTooStrong =
+  const canCompareStrength =
     !location.cleared &&
     location.enemyCount > 0 &&
-    availableSurvivorCount > 0 &&
-    scoutTeamCombat < enemyPower;
+    (hasMission ? teamCombat > 0 : availableSurvivorCount > 0);
+  const enemiesTooStrong =
+    canCompareStrength && teamCombat < enemyPower;
 
   useFrame((state) => {
     if (ringRef.current) {
@@ -959,10 +966,13 @@ function LocationMarker({
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-      {/* The building — faded if cleared */}
+      {/* The building — green tint when cleared; grey when fully salvaged */}
       <group>
-        <LocationBuilding type={location.type} />
-        {location.cleared && (
+        <LocationBuilding
+          type={location.type}
+          depleted={location.salvageDepleted}
+        />
+        {location.cleared && !location.salvageDepleted && (
           // Overlay a translucent green tint on cleared buildings
           <mesh position={[0, 0, 0]}>
             <boxGeometry args={[2.5, 2.5, 2.5]} />
@@ -1007,33 +1017,32 @@ function LocationMarker({
         <meshBasicMaterial color={markerColor} />
       </mesh>
 
-      {/* Cleared indicator — green ring on the ground + floating checkmark flag */}
+      {/* Cleared indicator — ring on the ground + floating flag (grey if depleted) */}
       {location.cleared && !isBase && (
         <>
-          {/* Persistent green ring on the ground (always visible from top) */}
           <mesh
             rotation={[-Math.PI / 2, 0, 0]}
             position={[0, 0.08, 0]}
           >
             <ringGeometry args={[2.0, 2.3, 24]} />
             <meshBasicMaterial
-              color="#22c55e"
+              color={location.salvageDepleted ? "#6b7280" : "#22c55e"}
               transparent
               opacity={0.6}
               side={THREE.DoubleSide}
             />
           </mesh>
-          {/* Floating flag with checkmark (visible from any angle) */}
           <group position={[0, 3.5, 0]}>
-            {/* Pole */}
             <mesh position={[0, -0.6, 0]}>
               <cylinderGeometry args={[0.04, 0.04, 1.2, 6]} />
               <meshBasicMaterial color="#1a1a1a" />
             </mesh>
-            {/* Flag */}
             <mesh position={[0.3, -0.1, 0]}>
               <planeGeometry args={[0.6, 0.4]} />
-              <meshBasicMaterial color="#22c55e" side={THREE.DoubleSide} />
+              <meshBasicMaterial
+                color={location.salvageDepleted ? "#9ca3af" : "#22c55e"}
+                side={THREE.DoubleSide}
+              />
             </mesh>
           </group>
         </>
@@ -1093,20 +1102,22 @@ function LocationMarker({
               )}
             </div>
 
-            {!location.cleared && location.enemyCount > 0 && availableSurvivorCount > 0 && (
+            {canCompareStrength && (
               <div
                 className={`text-[10px] mt-1 mb-2 ${
                   enemiesTooStrong ? "text-red-400" : "text-stone-500"
                 }`}
               >
                 <span>
-                  Your team {scoutTeamCombat.toFixed(1)} vs enemies{" "}
-                  {enemyPower.toFixed(1)}
+                  {hasMission ? "Scouting team" : "Your team"}{" "}
+                  {teamCombat.toFixed(1)} vs enemies {enemyPower.toFixed(1)}
                 </span>
                 {enemiesTooStrong && (
                   <span className="flex items-center gap-1 font-semibold mt-1">
                     <AlertTriangle className="w-3 h-3 shrink-0" />
-                    Too strong for available survivors
+                    {hasMission
+                      ? "Scouting team may be too weak"
+                      : "Too strong for available survivors"}
                   </span>
                 )}
               </div>
@@ -1342,7 +1353,7 @@ function Scene({
   onHoverLocation,
   onDismissPopups,
   availableSurvivorCount,
-  scoutTeamCombat,
+  defaultTeamCombat,
   areaHasBase,
   onScoutLocation,
   onOpenManualLocation,
@@ -1355,7 +1366,7 @@ function Scene({
   onHoverLocation: (id: string | null) => void;
   onDismissPopups: () => void;
   availableSurvivorCount: number;
-  scoutTeamCombat: number;
+  defaultTeamCombat: number;
   areaHasBase: boolean;
   onScoutLocation: (locationId: string) => void;
   onOpenManualLocation: (locationId: string) => void;
@@ -1363,6 +1374,7 @@ function Scene({
   onCancelMission: (locationId: string) => void;
 }) {
   const area = useGameStore((s) => s.areas[s.currentAreaId]);
+  const allSurvivors = useGameStore((s) => s.survivors);
   const locations = area?.locations ?? [];
   const missions = area?.missions ?? [];
   const locationPositions = useMemo(
@@ -1402,9 +1414,19 @@ function Scene({
       {!area?.hasBase && <CampTent />}
 
       {locations.map((loc) => {
-        const hasMission = missions.some(
+        const pendingMission = missions.find(
           (m) => m.locationId === loc.id && m.status === "pending"
         );
+        const hasMission = !!pendingMission;
+        const missionSurvivors = pendingMission
+          ? pendingMission.team
+              .map((id) => allSurvivors[id])
+              .filter((s): s is Survivor => !!s)
+          : [];
+        const teamCombat = pendingMission
+          ? getTeamCombatPower(missionSurvivors)
+          : defaultTeamCombat;
+
         return (
           <LocationMarker
             key={loc.id}
@@ -1415,7 +1437,7 @@ function Scene({
             isBase={area?.baseLocationId === loc.id}
             canClaimBase={!areaHasBase && loc.cleared && area?.baseLocationId !== loc.id}
             availableSurvivorCount={availableSurvivorCount}
-            scoutTeamCombat={scoutTeamCombat}
+            teamCombat={teamCombat}
             onHoverStart={() => onHoverLocation(loc.id)}
             onHoverEnd={() => {
               if (hoveredLocationId === loc.id) onHoverLocation(null);
@@ -1487,7 +1509,7 @@ export function AreaMapView() {
   const autoSelectedSurvivors = [...availableSurvivors]
     .sort((a, b) => b.skills.combat - a.skills.combat)
     .slice(0, maxTeamSize);
-  const scoutTeamCombat = getTeamCombatPower(autoSelectedSurvivors);
+  const defaultTeamCombat = getTeamCombatPower(autoSelectedSurvivors);
 
   const handleScoutAll = (locationId: string) => {
     const ids = autoSelectedSurvivors.map((s) => s.id);
@@ -1541,7 +1563,7 @@ export function AreaMapView() {
           onHoverLocation={setHoveredLocationId}
           onDismissPopups={dismissPopups}
           availableSurvivorCount={availableSurvivors.length}
-          scoutTeamCombat={scoutTeamCombat}
+          defaultTeamCombat={defaultTeamCombat}
           areaHasBase={area?.hasBase ?? false}
           onScoutLocation={handleScoutAll}
           onOpenManualLocation={handleOpenManual}

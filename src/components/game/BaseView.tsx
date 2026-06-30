@@ -1,7 +1,7 @@
 "use client";
 
 import { useGameStore, selectSurvivorCapacity } from "@/game/store";
-import { BUILDING_DEFS, getUpgradeCost, RESOURCE_INFO } from "@/game/data";
+import { BUILDING_DEFS, getUpgradeCost, RESOURCE_INFO, getBaseDefense, getAreaConsumption, INFIRMARY_HEAL_PER_LEVEL } from "@/game/data";
 import { BuildingType, Survivor } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -73,7 +73,9 @@ export function BaseView() {
   // Daily production values (shown in the summary card)
   const farmFood = buildings.farm.level * 5;
   const wellWater = buildings.well.level * 5;
-  const infirmaryHeal = buildings.infirmary.level * 10;
+  const baseDefense = getBaseDefense(buildings.watchtower.level, survivors);
+  const dailyConsumption = getAreaConsumption(survivors);
+  const infirmaryBonus = buildings.infirmary.level * INFIRMARY_HEAL_PER_LEVEL;
 
   return (
     <div className="space-y-4">
@@ -93,15 +95,17 @@ export function BaseView() {
           label="Injured"
           value={injuredSurvivors.length.toString()}
           sublabel={
-            injuredSurvivors.length === 0 ? "All healthy" : "Needs infirmary"
+            injuredSurvivors.length === 0
+              ? "All healthy"
+              : "Rest injured for recovery"
           }
           tone={injuredSurvivors.length > 0 ? "warning" : "ok"}
         />
         <OverviewCard
           icon={<ShieldAlert className="w-5 h-5 text-amber-400" />}
           label="Defense"
-          value={(buildings.watchtower.level * 15).toString()}
-          sublabel={`Tower Lv ${buildings.watchtower.level}`}
+          value={baseDefense.total.toString()}
+          sublabel={`Tower ${baseDefense.tower} + Guards ${baseDefense.guards}`}
           tone="ok"
         />
         <OverviewCard
@@ -122,24 +126,33 @@ export function BaseView() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
           <div className="flex items-center justify-between bg-stone-950/40 rounded px-2 py-1">
             <span className="text-stone-400">🍔 Food</span>
-            <span className={farmFood - survivors.length >= 0 ? "text-emerald-300" : "text-red-300"}>
-              {farmFood > 0 ? `+${farmFood}` : "+0"} {survivors.length > 0 && `− ${survivors.length}`} = {farmFood - survivors.length >= 0 ? "+" : ""}{farmFood - survivors.length}
+            <span className={farmFood - dailyConsumption.food >= 0 ? "text-emerald-300" : "text-red-300"}>
+              {farmFood > 0 ? `+${farmFood}` : "+0"}
+              {survivors.length > 0 && ` − ${dailyConsumption.food}`} ={" "}
+              {farmFood - dailyConsumption.food >= 0 ? "+" : ""}
+              {farmFood - dailyConsumption.food}
             </span>
           </div>
           <div className="flex items-center justify-between bg-stone-950/40 rounded px-2 py-1">
             <span className="text-stone-400">💧 Water</span>
-            <span className={wellWater - survivors.length >= 0 ? "text-emerald-300" : "text-red-300"}>
-              {wellWater > 0 ? `+${wellWater}` : "+0"} {survivors.length > 0 && `− ${survivors.length}`} = {wellWater - survivors.length >= 0 ? "+" : ""}{wellWater - survivors.length}
+            <span className={wellWater - dailyConsumption.water >= 0 ? "text-emerald-300" : "text-red-300"}>
+              {wellWater > 0 ? `+${wellWater}` : "+0"}
+              {survivors.length > 0 && ` − ${dailyConsumption.water}`} ={" "}
+              {wellWater - dailyConsumption.water >= 0 ? "+" : ""}
+              {wellWater - dailyConsumption.water}
             </span>
           </div>
           <div className="flex items-center justify-between bg-stone-950/40 rounded px-2 py-1">
-            <span className="text-stone-400">💊 Medicine</span>
+            <span className="text-stone-400">⚕️ Infirmary</span>
             <span className="text-stone-300">
-              {infirmaryHeal > 0 ? `+${infirmaryHeal} HP/surv` : "no infirmary"}
+              {infirmaryBonus > 0
+                ? `+${infirmaryBonus} HP resting`
+                : "rest to heal"}
             </span>
           </div>
         </div>
-        {(farmFood - survivors.length < 0 || wellWater - survivors.length < 0) && (
+        {(farmFood - dailyConsumption.food < 0 ||
+          wellWater - dailyConsumption.water < 0) && (
           <div className="mt-2 text-[11px] text-red-400 flex items-center gap-1">
             <AlertCircle className="w-3 h-3" />
             Warning: production does not cover daily consumption. Survivors will go hungry/thirsty.
@@ -418,6 +431,8 @@ function SurvivorMiniCard({ survivor }: { survivor: Survivor }) {
       ? "On Mission"
       : survivor.role === "working"
       ? "Assigned"
+      : survivor.role === "guarding"
+      ? "Guarding"
       : "Idle";
 
   return (

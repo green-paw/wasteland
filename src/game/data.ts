@@ -7,7 +7,16 @@ import {
   ResourceType,
   Resources,
   Survivor,
+  SurvivorStatus,
 } from "./types";
+
+export const RATIONS_PER_SURVIVOR = 1;
+export const INTENSIVE_RATIONS_MULTIPLIER = 2;
+export const NATURAL_HEAL_PER_DAY = 2;
+export const INFIRMARY_HEAL_PER_LEVEL = 5;
+
+export const WATCHTOWER_DEFENSE_PER_LEVEL = 15;
+export const GUARD_COMBAT_DEFENSE_MULTIPLIER = 2;
 
 export const RESOURCE_INFO: Record<
   ResourceType,
@@ -63,9 +72,9 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     type: "infirmary",
     label: "Infirmary",
     icon: "⚕️",
-    description: "Heals injured and sick survivors each day.",
+    description: "Boosts recovery for survivors on bed rest.",
     baseCost: { materials: 30, water: 10 },
-    effects: ["Heals +10 HP per survivor per level each day"],
+    effects: ["+5 HP per level for resting injured survivors"],
     startingLevel: 0,
     maxLevel: 5,
     baseHp: 70,
@@ -282,6 +291,80 @@ export function getTeamCombatPower(survivors: Survivor[]): number {
     survivors.reduce((sum, s) => sum + s.skills.combat, 0) +
     survivors.reduce((sum, s) => sum + (s.health > 50 ? 1 : 0), 0) * 0.5
   );
+}
+
+export function getWatchtowerDefense(watchtowerLevel: number): number {
+  return watchtowerLevel * WATCHTOWER_DEFENSE_PER_LEVEL;
+}
+
+export function getGuardDefense(survivors: Survivor[]): number {
+  return survivors
+    .filter((s) => s.role === "guarding")
+    .reduce(
+      (sum, s) => sum + s.skills.combat * GUARD_COMBAT_DEFENSE_MULTIPLIER,
+      0
+    );
+}
+
+export function getBaseDefense(
+  watchtowerLevel: number,
+  survivors: Survivor[]
+): { tower: number; guards: number; total: number } {
+  const tower = getWatchtowerDefense(watchtowerLevel);
+  const guards = getGuardDefense(survivors);
+  return { tower, guards, total: tower + guards };
+}
+
+export function survivorNeedsIntensiveCare(survivor: Survivor): boolean {
+  return survivor.role === "resting" && survivor.status !== "healthy";
+}
+
+export function getSurvivorDailyRations(survivor: Survivor): {
+  food: number;
+  water: number;
+} {
+  if (survivorNeedsIntensiveCare(survivor)) {
+    return {
+      food: RATIONS_PER_SURVIVOR * INTENSIVE_RATIONS_MULTIPLIER,
+      water: RATIONS_PER_SURVIVOR * INTENSIVE_RATIONS_MULTIPLIER,
+    };
+  }
+  return { food: RATIONS_PER_SURVIVOR, water: RATIONS_PER_SURVIVOR };
+}
+
+export function getAreaConsumption(survivors: Survivor[]): {
+  food: number;
+  water: number;
+} {
+  return survivors.reduce(
+    (acc, s) => {
+      const rations = getSurvivorDailyRations(s);
+      return {
+        food: acc.food + rations.food,
+        water: acc.water + rations.water,
+      };
+    },
+    { food: 0, water: 0 }
+  );
+}
+
+const REST_HEAL_BY_STATUS: Record<Exclude<SurvivorStatus, "healthy">, number> =
+  {
+    injured: 10,
+    sick: 5,
+    critical: 15,
+  };
+
+export function getRestHealAmount(
+  survivor: Survivor,
+  infirmaryLevel: number
+): number {
+  if (survivor.role !== "resting" || survivor.status === "healthy") return 0;
+
+  const base = REST_HEAL_BY_STATUS[survivor.status];
+  const infirmaryBonus = infirmaryLevel * INFIRMARY_HEAL_PER_LEVEL;
+  const medicalBonus = Math.floor(survivor.skills.medical / 10);
+  return base + infirmaryBonus + medicalBonus;
 }
 
 export function getLocationEnemyPower(location: GameLocation): number {

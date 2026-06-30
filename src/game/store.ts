@@ -22,6 +22,11 @@ import {
   ENEMY_INFO,
   getLocationEnemyPower,
   getTeamCombatPower,
+  getBaseDefense,
+  getAreaConsumption,
+  getSurvivorDailyRations,
+  getRestHealAmount,
+  NATURAL_HEAL_PER_DAY,
   getNeighborHexes,
   getSurvivorCapacity,
   getMaxTeamSize,
@@ -58,7 +63,12 @@ export function isSurvivorAvailableForDispatch(
 ): boolean {
   if (!area.survivorIds.includes(survivor.id)) return false;
   if (survivor.health < 30) return false;
-  if (survivor.role === "resting" || survivor.role === "onMission") return false;
+  if (
+    survivor.role === "resting" ||
+    survivor.role === "onMission" ||
+    survivor.role === "guarding"
+  )
+    return false;
   const pending = pendingIds ?? getPendingMissionSurvivorIds(area);
   return !pending.has(survivor.id);
 }
@@ -263,6 +273,49 @@ function autoDispatchIdleSurvivors(
   }
 }
 
+function applySurvivorGuardRole(
+  area: Area,
+  allSurvivors: Record<string, Survivor>,
+  survivorId: string,
+  guarding: boolean
+): void {
+  const survivor = allSurvivors[survivorId];
+  if (!survivor) return;
+  allSurvivors[survivorId] = {
+    ...survivor,
+    role: guarding ? "guarding" : "idle",
+    assignedTeamId: undefined,
+  };
+  area.teams = area.teams.map((t) => ({
+    ...t,
+    memberIds: t.memberIds.filter((id) => id !== survivorId),
+  }));
+}
+
+/** When nothing remains to scout/salvage, idle survivors guard the base. */
+function autoAssignBaseGuards(
+  area: Area,
+  allSurvivors: Record<string, Survivor>,
+  day: number,
+  newLog: GameLogEntry[]
+): void {
+  if (!area.hasBase || locationsNeedingWork(area).length > 0) return;
+
+  const toGuard = area.survivorIds.filter(
+    (id) => allSurvivors[id]?.role === "idle"
+  );
+  for (const id of toGuard) {
+    applySurvivorGuardRole(area, allSurvivors, id, true);
+  }
+  if (toGuard.length > 0) {
+    newLog.push({
+      day,
+      message: `[${area.name}] ${toGuard.length} idle survivor(s) assigned to guard the base.`,
+      type: "info",
+    });
+  }
+}
+
 function clampResources(res: Resources, caps: Resources): Resources {
   const out: Resources = { ...res };
   (Object.keys(out) as ResourceType[]).forEach((k) => {
@@ -420,6 +473,7 @@ interface GameStore extends GameState {
 
   // survivor actions (operate on current area)
   setSurvivorResting: (survivorId: string, resting: boolean) => void;
+  setSurvivorGuarding: (survivorId: string, guarding: boolean) => void;
 
   // main loop
   endDay: () => void;
@@ -736,37 +790,46 @@ function processArea(
   }
 
   // ---------- 3. Survivor consumption ----------
-  const consumption = areaSurvivors.length;
-  const foodNeeded = consumption;
-  const waterNeeded = consumption;
-  let foodShortage = 0;
-  let waterShortage = 0;
+  const survivorFed = new Map<string, boolean>();
+  let foodConsumed = 0;
+  let waterConsumed = 0;
+  let unfedCount = 0;
 
-  if (resources.food >= foodNeeded) {
-    resources.food -= foodNeeded;
-  } else {
-    foodShortage = foodNeeded - resources.food;
-    resources.food = 0;
-  }
-  if (resources.water >= waterNeeded) {
-    resources.water -= waterNeeded;
-  } else {
-    waterShortage = waterNeeded - resources.water;
-    resources.water = 0;
-  }
+  areaSurvivors.forEach((s) => {
+    const { food, water } = getSurvivorDailyRations(s);
+    const fed = resources.food >= food && resources.water >= water;
+    if (fed) {
+      resources.food -= food;
+      resources.water -= water;
+      foodConsumed += food;
+      waterConsumed += water;
+    } else {
+      unfedCount++;
+    }
+    survivorFed.set(s.id, fed);
+  });
 
-  if (foodShortage > 0) {
-    newLog.push({ day, message: `[${area.name}] Food shortage! ${foodShortage} survivors go hungry.`, type: "warning" });
-  } else if (consumption > 0) {
-    newLog.push({ day, message: `[${area.name}] Survivors consumed ${foodNeeded} food and ${waterNeeded} water.`, type: "info" });
-  }
-  if (waterShortage > 0) {
-    newLog.push({ day, message: `[${area.name}] Water shortage! ${waterShortage} survivors are dehydrated.`, type: "warning" });
+  if (unfedCount > 0) {
+    newLog.push({
+      day,
+      message: `[${area.name}] Ration shortage! ${unfedCount} survivor${unfedCount === 1 ? "" : "s"} went without full rations.`,
+      type: "warning",
+    });
+  } else if (areaSurvivors.length > 0) {
+    newLog.push({
+      day,
+      message: `[${area.name}] Survivors consumed ${foodConsumed} food and ${waterConsumed} water.`,
+      type: "info",
+    });
   }
 
   // ---------- 4. Update survivor stats ----------
+  const infirmaryLevel = area.hasBase ? area.buildings.infirmary.level : 0;
+
   areaSurvivors.forEach((s) => {
-    if (foodShortage === 0 && s.role !== "onMission") {
+    const fed = survivorFed.get(s.id) ?? false;
+
+    if (fed && s.role !== "onMission") {
       s.hunger = Math.max(0, s.hunger - 30);
     } else if (s.role === "onMission") {
       s.hunger = Math.min(100, s.hunger + 10);
@@ -775,7 +838,7 @@ function processArea(
       s.health = Math.max(0, s.health - 5);
     }
 
-    if (waterShortage === 0 && s.role !== "onMission") {
+    if (fed && s.role !== "onMission") {
       s.thirst = Math.max(0, s.thirst - 35);
     } else if (s.role === "onMission") {
       s.thirst = Math.min(100, s.thirst + 15);
@@ -794,37 +857,45 @@ function processArea(
     }
 
     if (s.role === "resting") {
-      s.morale = Math.min(100, s.morale + 10);
-      s.health = Math.min(100, s.health + 5);
+      if (s.status === "healthy") {
+        s.morale = Math.min(100, s.morale + 10);
+      } else if (fed) {
+        const heal = getRestHealAmount(s, infirmaryLevel);
+        s.health = Math.min(100, s.health + heal);
+        s.morale = Math.min(100, s.morale + 5);
+        if (heal > 0) {
+          newLog.push({
+            day,
+            message: `[${area.name}] ${s.name} recuperating on bed rest (+${heal} HP).`,
+            type: "success",
+          });
+        }
+      } else {
+        s.morale = Math.max(0, s.morale - 5);
+        newLog.push({
+          day,
+          message: `[${area.name}] ${s.name} lacked rations for bed rest.`,
+          type: "warning",
+        });
+      }
     }
+
     if (s.health < 30) {
       s.morale = Math.max(0, s.morale - 5);
     }
   });
 
-  // ---------- 5. Healing ----------
-  if (area.hasBase && area.buildings.infirmary.level > 0) {
-    const heal = area.buildings.infirmary.level * 10;
-    areaSurvivors.forEach((s) => {
-      if (s.status !== "healthy" && s.health < 100) {
-        s.health = Math.min(100, s.health + heal);
-        if (s.health >= 70) s.status = "healthy";
-        else if (s.health >= 40 && s.status === "critical") s.status = "injured";
-        newLog.push({ day, message: `[${area.name}] ${s.name} treated at infirmary (+${heal} HP).`, type: "success" });
-      }
-    });
-  } else {
-    areaSurvivors.forEach((s) => {
-      if (s.status !== "healthy" && s.health < 100) {
-        const naturalHeal = 3;
-        s.health = Math.min(100, s.health + naturalHeal);
-        if (s.health >= 70) s.status = "healthy";
-        else if (s.health >= 40 && s.status === "critical") s.status = "injured";
-      }
-    });
-  }
-
-  // Update status
+  // ---------- 5. Natural heal (idle injured) ----------
+  areaSurvivors.forEach((s) => {
+    if (
+      s.status !== "healthy" &&
+      s.health < 100 &&
+      s.role !== "resting" &&
+      s.role !== "onMission"
+    ) {
+      s.health = Math.min(100, s.health + NATURAL_HEAL_PER_DAY);
+    }
+  });
   areaSurvivors.forEach((s) => {
     if (s.health <= 0) {
       // dead
@@ -856,11 +927,10 @@ function processArea(
     const rng = makeRng(day * 9973 + 7 + area.hex[0] * 31 + area.hex[1] * 17);
     if (day > 2 && rng() < 0.2) {
       const raidPower = randInt(rng, 2, 4) + Math.floor(day / 3);
-      const defense =
-        area.buildings.watchtower.level * 15 +
+      const { total: defense } = getBaseDefense(
+        area.buildings.watchtower.level,
         areaSurvivors
-          .filter((s) => s.role === "idle")
-          .reduce((sum, s) => sum + s.skills.combat * 2, 0);
+      );
 
       if (defense >= raidPower) {
         newLog.push({ day, message: `[${area.name}] Bandit raid repelled.`, type: "success" });
@@ -884,6 +954,8 @@ function processArea(
   areaSurvivors.forEach((s) => {
     if (s.role === "onMission") s.role = "idle";
   });
+
+  autoAssignBaseGuards(area, allSurvivors, day, newLog);
 
   return { survivorsDied };
 }
@@ -1468,6 +1540,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
         ...t,
         memberIds: t.memberIds.filter((id) => id !== survivorId),
       }));
+    });
+    set({ areas, survivors });
+  },
+
+  setSurvivorGuarding: (survivorId, guarding) => {
+    const state = get();
+    const area = state.areas[state.currentAreaId];
+    if (!area?.hasBase) return;
+    const survivor = state.survivors[survivorId];
+    if (!survivor) return;
+    const survivors = { ...state.survivors };
+    const areas = updateArea(state, state.currentAreaId, (a) => {
+      applySurvivorGuardRole(a, survivors, survivorId, guarding);
     });
     set({ areas, survivors });
   },
