@@ -1,10 +1,7 @@
 export type ResourceType =
   | "food"
   | "water"
-  | "materials"
-  | "medicine"
-  | "fuel"
-  | "ammo";
+  | "materials";
 
 export type Resources = Record<ResourceType, number>;
 

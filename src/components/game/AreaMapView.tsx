@@ -6,7 +6,7 @@ import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useGameStore, isSurvivorAvailableForDispatch } from "@/game/store";
 import { getMaxTeamSize, LOCATION_DEFS, ENEMY_INFO, RESOURCE_INFO } from "@/game/data";
-import { GameLocation, LocationType, Survivor, AreaType } from "@/game/types";
+import { GameLocation, LocationType, Survivor, AreaType, EnemyType } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CharacterIcon } from "./CharacterIcon";
@@ -711,6 +711,164 @@ function LocationBuilding({ type }: { type: LocationType }) {
   }
 }
 
+// ---------- Wandering enemies at uncleared locations ----------
+function noopRaycast() {
+  return null;
+}
+
+const ENEMY_COLORS: Record<EnemyType, { body: string; accent: string }> = {
+  zombies: { body: "#4a6a4a", accent: "#8aaa6a" },
+  wild_dogs: { body: "#5a4030", accent: "#3a2820" },
+  raiders: { body: "#4a3830", accent: "#6a5040" },
+  mutants: { body: "#6a3040", accent: "#9a5060" },
+};
+
+function EnemyFigure({ type }: { type: EnemyType }) {
+  const c = ENEMY_COLORS[type];
+  switch (type) {
+    case "zombies":
+      return (
+        <group>
+          <mesh position={[0, 0.35, 0]} castShadow raycast={noopRaycast}>
+            <boxGeometry args={[0.28, 0.45, 0.2]} />
+            <meshStandardMaterial color={c.body} flatShading />
+          </mesh>
+          <mesh position={[0, 0.68, 0]} castShadow raycast={noopRaycast}>
+            <sphereGeometry args={[0.16, 6, 6]} />
+            <meshStandardMaterial color={c.accent} flatShading />
+          </mesh>
+          <mesh position={[0.22, 0.45, 0]} rotation={[0, 0, -0.5]} raycast={noopRaycast}>
+            <boxGeometry args={[0.35, 0.08, 0.08]} />
+            <meshStandardMaterial color={c.body} flatShading />
+          </mesh>
+        </group>
+      );
+    case "wild_dogs":
+      return (
+        <group>
+          <mesh
+            position={[0, 0.22, 0]}
+            rotation={[0, 0, Math.PI / 2]}
+            castShadow
+            raycast={noopRaycast}
+          >
+            <boxGeometry args={[0.55, 0.22, 0.18]} />
+            <meshStandardMaterial color={c.body} flatShading />
+          </mesh>
+          <mesh position={[0.28, 0.28, 0]} castShadow raycast={noopRaycast}>
+            <boxGeometry args={[0.2, 0.18, 0.16]} />
+            <meshStandardMaterial color={c.accent} flatShading />
+          </mesh>
+        </group>
+      );
+    case "raiders":
+      return (
+        <group>
+          <mesh position={[0, 0.38, 0]} castShadow raycast={noopRaycast}>
+            <boxGeometry args={[0.26, 0.5, 0.18]} />
+            <meshStandardMaterial color={c.body} flatShading />
+          </mesh>
+          <mesh position={[0, 0.72, 0]} castShadow raycast={noopRaycast}>
+            <sphereGeometry args={[0.14, 6, 6]} />
+            <meshStandardMaterial color="#c4a882" flatShading />
+          </mesh>
+          <mesh position={[0.18, 0.5, 0.12]} rotation={[0.3, 0, 0]} raycast={noopRaycast}>
+            <boxGeometry args={[0.06, 0.35, 0.06]} />
+            <meshStandardMaterial color="#2a2a2a" flatShading />
+          </mesh>
+        </group>
+      );
+    case "mutants":
+      return (
+        <group>
+          <mesh position={[0, 0.45, 0]} castShadow raycast={noopRaycast}>
+            <boxGeometry args={[0.38, 0.65, 0.3]} />
+            <meshStandardMaterial color={c.body} flatShading />
+          </mesh>
+          <mesh position={[0, 0.88, 0]} castShadow raycast={noopRaycast}>
+            <sphereGeometry args={[0.2, 6, 6]} />
+            <meshStandardMaterial color={c.accent} flatShading />
+          </mesh>
+        </group>
+      );
+  }
+}
+
+function wanderSeed(locationId: string, index: number): number {
+  let h = (index + 1) * 2654435761;
+  for (let i = 0; i < locationId.length; i++) {
+    h = Math.imul(h ^ locationId.charCodeAt(i), 2246822519);
+  }
+  return h >>> 0;
+}
+
+function WanderingEnemy({
+  enemyType,
+  index,
+  locationId,
+  total,
+}: {
+  enemyType: EnemyType;
+  index: number;
+  locationId: string;
+  total: number;
+}) {
+  const ref = useRef<THREE.Group>(null);
+  const params = useMemo(() => {
+    const seed = wanderSeed(locationId, index);
+    const r = (seed % 1000) / 1000;
+    return {
+      radius: 1.6 + r * 1.4,
+      speed: 0.25 + ((seed >> 8) % 100) / 200,
+      phase: ((seed >> 16) % 628) / 100,
+      bobPhase: ((seed >> 24) % 628) / 100,
+      angleOffset: (index / Math.max(1, total)) * Math.PI * 2,
+    };
+  }, [locationId, index, total]);
+
+  useFrame((state) => {
+    const g = ref.current;
+    if (!g) return;
+    const t = state.clock.elapsedTime;
+    const angle = t * params.speed + params.phase + params.angleOffset;
+    g.position.x = Math.cos(angle) * params.radius;
+    g.position.z = Math.sin(angle) * params.radius;
+    g.position.y = 0.02 + Math.abs(Math.sin(t * 3 + params.bobPhase)) * 0.06;
+    g.rotation.y = -angle + Math.PI / 2;
+  });
+
+  return (
+    <group ref={ref}>
+      <EnemyFigure type={enemyType} />
+    </group>
+  );
+}
+
+function LocationWanderers({
+  enemyType,
+  enemyCount,
+  locationId,
+}: {
+  enemyType: EnemyType;
+  enemyCount: number;
+  locationId: string;
+}) {
+  const count = Math.min(Math.max(1, enemyCount), 5);
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <WanderingEnemy
+          key={i}
+          enemyType={enemyType}
+          index={i}
+          locationId={locationId}
+          total={count}
+        />
+      ))}
+    </>
+  );
+}
+
 // ---------- Animated location marker ----------
 function LocationMarker({
   location,
@@ -808,6 +966,14 @@ function LocationMarker({
           </mesh>
         )}
       </group>
+
+      {!location.cleared && location.enemyCount > 0 && (
+        <LocationWanderers
+          enemyType={location.enemyType}
+          enemyCount={location.enemyCount}
+          locationId={location.id}
+        />
+      )}
 
       {/* Selection ring (animated) — for selected/hovered/mission */}
       {(selected || hovered || hasMission) && (
@@ -1330,37 +1496,7 @@ export function AreaMapView() {
   };
 
   return (
-    <Card className="bg-stone-950 border-stone-800 overflow-hidden h-[calc(100vh-12rem)] min-h-[480px] relative">
-      <div className="absolute top-3 left-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-3 py-1.5">
-        <div className="text-xs text-amber-300 font-bold">
-          {area?.name ?? "Unknown Area"}
-        </div>
-        <div className="text-[10px] text-stone-500">
-          Click a location to scout • Drag to pan • Scroll to zoom
-        </div>
-      </div>
-      <div className="absolute top-3 right-3 z-10 bg-stone-950/80 backdrop-blur border border-stone-800 rounded px-2 py-1.5 flex items-center gap-2 flex-wrap justify-end max-w-[50%]">
-        <div className="flex items-center gap-1">
-          <div className="w-2 h-2 rounded-full bg-red-600" />
-          <span className="text-[10px] text-stone-400">Hostile</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-2 h-2 rounded-full bg-amber-400" />
-          <span className="text-[10px] text-stone-400">Mission</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-2 h-2 rounded-full bg-green-500" />
-          <span className="text-[10px] text-stone-400">Cleared</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-2 h-2 rounded-full bg-stone-500" />
-          <span className="text-[10px] text-stone-400">Depleted</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] text-amber-400">🏠</span>
-          <span className="text-[10px] text-stone-400">Base</span>
-        </div>
-      </div>
+    <Card className="bg-stone-950 border-stone-800 overflow-hidden h-[calc(100vh-10rem)] min-h-[480px] relative">
       <Canvas
         shadows
         camera={{ position: [0, 22, 18], fov: 45 }}

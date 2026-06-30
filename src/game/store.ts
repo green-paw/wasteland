@@ -319,9 +319,6 @@ const BASELESS_CAPS: Resources = {
   food: 20,
   water: 20,
   materials: 20,
-  medicine: 10,
-  fuel: 10,
-  ammo: 10,
 };
 
 function calculateCaps(area: Area): Resources {
@@ -810,13 +807,10 @@ function processArea(
     const heal = area.buildings.infirmary.level * 10;
     areaSurvivors.forEach((s) => {
       if (s.status !== "healthy" && s.health < 100) {
-        if (resources.medicine >= 1) {
-          resources.medicine -= 1;
-          s.health = Math.min(100, s.health + heal);
-          if (s.health >= 70) s.status = "healthy";
-          else if (s.health >= 40 && s.status === "critical") s.status = "injured";
-          newLog.push({ day, message: `[${area.name}] ${s.name} treated at infirmary (+${heal} HP).`, type: "success" });
-        }
+        s.health = Math.min(100, s.health + heal);
+        if (s.health >= 70) s.status = "healthy";
+        else if (s.health >= 40 && s.status === "critical") s.status = "injured";
+        newLog.push({ day, message: `[${area.name}] ${s.name} treated at infirmary (+${heal} HP).`, type: "success" });
       }
     });
   } else {
@@ -869,7 +863,6 @@ function processArea(
           .reduce((sum, s) => sum + s.skills.combat * 2, 0);
 
       if (defense >= raidPower) {
-        resources.ammo = Math.max(0, resources.ammo - Math.min(resources.ammo, raidPower));
         newLog.push({ day, message: `[${area.name}] Bandit raid repelled.`, type: "success" });
       } else {
         const stolenFood = Math.min(resources.food, randInt(rng, 5, 15));

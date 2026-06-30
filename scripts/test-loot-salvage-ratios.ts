@@ -27,18 +27,12 @@ for (const type of ALL_LOCATION_TYPES) {
   const lootMats = (def.lootTable.materials ?? 0) as number;
   const lootOther =
     ((def.lootTable.food ?? 0) as number) +
-    ((def.lootTable.water ?? 0) as number) +
-    ((def.lootTable.medicine ?? 0) as number) +
-    ((def.lootTable.fuel ?? 0) as number) +
-    ((def.lootTable.ammo ?? 0) as number);
+    ((def.lootTable.water ?? 0) as number);
 
   const salvageMats = (def.salvageTable.materials ?? 0) as number;
   const salvageOther =
     ((def.salvageTable.food ?? 0) as number) +
-    ((def.salvageTable.water ?? 0) as number) +
-    ((def.salvageTable.medicine ?? 0) as number) +
-    ((def.salvageTable.fuel ?? 0) as number) +
-    ((def.salvageTable.ammo ?? 0) as number);
+    ((def.salvageTable.water ?? 0) as number);
 
   const lootMatsPct = lootMats + lootOther > 0 ? (lootMats / (lootMats + lootOther)) * 100 : 0;
   const salvageMatsPct =

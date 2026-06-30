@@ -3,7 +3,7 @@
  * Verifies:
  * 1. Salvage mission extracts resources from the salvage pool
  * 2. Materials are always extracted (primary yield)
- * 3. Building-specific resources are also extracted (food from supermarket, fuel from gas station, etc.)
+ * 3. Building-specific resources are also extracted (food from supermarket, water from hospital, etc.)
  * 4. Pool depletes over multiple days
  * 5. Depleted locations can't be salvaged again
  */
@@ -88,14 +88,14 @@ assert(
 console.log("\n=== Test 2: Building-specific salvage resources ===");
 reset();
 
-// Find a gas_station (should give fuel from salvage)
+// Find a gas_station (should give food/water from salvage)
 const state2 = useGameStore.getState();
 const gasStation = state2.locations.find((l) => l.type === "gas_station");
 if (gasStation) {
   console.log(`Gas Station salvage pool:`, gasStation.salvagePool);
   assert(
-    (gasStation.salvagePool.fuel ?? 0) > 0,
-    "Gas station should have fuel in salvage pool"
+    (gasStation.salvagePool.food ?? 0) > 0,
+    "Gas station should have food in salvage pool"
   );
   assert(
     (gasStation.salvagePool.materials ?? 0) > 0,
@@ -117,13 +117,13 @@ if (supermarket) {
   console.log("No supermarket in this world — skipping");
 }
 
-// Find a hospital (should give medicine)
+// Find a hospital (should give water)
 const hospital = state2.locations.find((l) => l.type === "hospital");
 if (hospital) {
   console.log(`Hospital salvage pool:`, hospital.salvagePool);
   assert(
-    (hospital.salvagePool.medicine ?? 0) > 0,
-    "Hospital should have medicine in salvage pool"
+    (hospital.salvagePool.water ?? 0) > 0,
+    "Hospital should have water in salvage pool"
   );
 } else {
   console.log("No hospital in this world — skipping");

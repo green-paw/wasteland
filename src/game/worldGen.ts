@@ -324,7 +324,7 @@ export function generateWorld(seed: number): {
 
 // ---------- Helpers for empty state ----------
 function emptyResources(): Resources {
-  return { food: 0, water: 0, materials: 0, medicine: 0, fuel: 0, ammo: 0 };
+  return { food: 0, water: 0, materials: 0 };
 }
 
 function emptyBuildings(starting: boolean): Record<string, any> {
