@@ -8,6 +8,7 @@ import {
   GameLocation,
   GameLogEntry,
   GameState,
+  MapFloaterEvent,
   Mission,
   MissionResult,
   Resources,
@@ -34,6 +35,7 @@ import {
   INITIAL_RESOURCE_CAPS,
   INITIAL_RESOURCES,
   LOCATION_DEFS,
+  RESOURCE_ORDER,
 } from "./data";
 import {
   expandWorldAroundHex,
@@ -431,7 +433,27 @@ function createInitialState(): GameState {
       },
     ],
     gameOver: false,
+    areaMapFloaters: [],
+    areaMapDismissSignal: 0,
   };
+}
+
+function pushResourceFloater(
+  floaters: MapFloaterEvent[],
+  opts: {
+    id: string;
+    areaId: string;
+    locationId: string;
+    kind: MapFloaterEvent["kind"];
+    loot: Partial<Resources>;
+  }
+): void {
+  const lines = RESOURCE_ORDER.flatMap((resource) => {
+    const amount = opts.loot[resource] ?? 0;
+    return amount > 0 ? [{ resource, amount }] : [];
+  });
+  if (lines.length === 0) return;
+  floaters.push({ ...opts, lines });
 }
 
 // ---------- Store Interface ----------
@@ -477,6 +499,8 @@ interface GameStore extends GameState {
 
   // main loop
   endDay: () => void;
+  clearAreaMapFloater: (id: string) => void;
+  dismissAreaMapPopups: () => void;
 }
 
 // ---------- Resolve a scout Mission (combat + loot) ----------
@@ -626,7 +650,8 @@ function processArea(
   area: Area,
   allSurvivors: Record<string, Survivor>,
   day: number,
-  newLog: GameLogEntry[]
+  newLog: GameLogEntry[],
+  floaters: MapFloaterEvent[]
 ): { survivorsDied: string[] } {
   const survivorsDied: string[] = [];
 
@@ -738,6 +763,14 @@ function processArea(
         resources[k as ResourceType] += v as number;
       }
 
+      pushResourceFloater(floaters, {
+        id: `salvage_${m.id}_${day}`,
+        areaId: area.id,
+        locationId: location.id,
+        kind: "salvage",
+        loot: lootGained,
+      });
+
       // Salvage missions are one-cycle tasks: resolve now, then free survivors.
       teamSurvivors.forEach((s) => {
         s.role = "idle";
@@ -754,6 +787,14 @@ function processArea(
     for (const [k, v] of Object.entries(result.lootGained)) {
       resources[k as ResourceType] += v as number;
     }
+
+    pushResourceFloater(floaters, {
+      id: `scout_${m.id}_${day}`,
+      areaId: area.id,
+      locationId: location.id,
+      kind: "scout",
+      loot: result.lootGained,
+    });
 
     result.casualties.forEach((id) => survivorsDied.push(id));
     result.survivorsRecruited.forEach((ns) => {
@@ -941,6 +982,20 @@ function processArea(
         resources.food -= stolenFood;
         resources.water -= stolenWater;
         resources.materials -= stolenMats;
+        const stolenTotal = stolenFood + stolenWater + stolenMats;
+        if (area.baseLocationId && stolenTotal > 0) {
+          pushResourceFloater(floaters, {
+            id: `raid_${area.id}_${day}_${stolenTotal}`,
+            areaId: area.id,
+            locationId: area.baseLocationId,
+            kind: "raid",
+            loot: {
+              food: stolenFood,
+              water: stolenWater,
+              materials: stolenMats,
+            },
+          });
+        }
         newLog.push({ day, message: `[${area.name}] Bandits broke through! Lost ${stolenFood} food, ${stolenWater} water, ${stolenMats} materials.`, type: "danger" });
       }
     }
@@ -1605,9 +1660,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       // Process each discovered area
       const allDied: string[] = [];
+      const areaMapFloaters: MapFloaterEvent[] = [];
       for (const area of Object.values(state.areas)) {
         if (!area.discovered) continue;
-        const { survivorsDied } = processArea(area, allSurvivors, day, newLog);
+        const { survivorsDied } = processArea(
+          area,
+          allSurvivors,
+          day,
+          newLog,
+          areaMapFloaters
+        );
         allDied.push(...survivorsDied);
       }
 
@@ -1650,10 +1712,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
         survivors: allSurvivors,
         transfers: remainingTransfers,
         log: newLog.slice(-120),
+        areaMapFloaters,
         gameOver,
         gameOverReason,
       };
     });
+  },
+
+  clearAreaMapFloater: (id) => {
+    set((state) => ({
+      areaMapFloaters: state.areaMapFloaters.filter((f) => f.id !== id),
+    }));
+  },
+
+  dismissAreaMapPopups: () => {
+    set((state) => ({
+      areaMapDismissSignal: state.areaMapDismissSignal + 1,
+    }));
   },
 }));
 

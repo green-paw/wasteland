@@ -111,6 +111,20 @@ export interface GameLogEntry {
   type: "info" | "success" | "warning" | "danger";
 }
 
+/** Short-lived popup on the area map after End Day (scout/salvage loot / raid losses). */
+export interface MapFloaterLine {
+  resource: ResourceType;
+  amount: number;
+}
+
+export interface MapFloaterEvent {
+  id: string;
+  areaId: string;
+  locationId: string;
+  kind: "salvage" | "scout" | "raid";
+  lines: MapFloaterLine[];
+}
+
 export interface Team {
   id: string;
   name: string;
@@ -177,6 +191,8 @@ export interface GameState {
   // In-transit transfers between areas
   transfers: Transfer[];
   log: GameLogEntry[];
+  areaMapFloaters: MapFloaterEvent[];
+  areaMapDismissSignal: number;
   gameOver: boolean;
   gameOverReason?: string;
 }

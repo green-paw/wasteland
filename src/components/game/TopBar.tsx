@@ -4,9 +4,12 @@ import { RESOURCE_INFO, RESOURCE_ORDER, AREA_TYPE_DEFS } from "@/game/data";
 import { useGameStore } from "@/game/store";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Moon, AlertTriangle, Home, Users } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { EndDayDialog } from "./EndDayDialog";
+
+const END_DAY_DIALOG_KEY = "wasteland-end-day-dialog";
 
 function Divider() {
   return <div className="h-6 w-px bg-stone-800 shrink-0 hidden sm:block" />;
@@ -16,7 +19,29 @@ export function TopBar() {
   const currentArea = useGameStore((s) => s.areas[s.currentAreaId]);
   const survivors = useGameStore((s) => s.survivors);
   const day = useGameStore((s) => s.day);
+  const endDay = useGameStore((s) => s.endDay);
+  const dismissAreaMapPopups = useGameStore((s) => s.dismissAreaMapPopups);
   const [endDayOpen, setEndDayOpen] = useState(false);
+  const [dialogEnabled, setDialogEnabled] = useState(true);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(END_DAY_DIALOG_KEY);
+    if (saved !== null) setDialogEnabled(saved === "true");
+  }, []);
+
+  const setDialogPreference = (enabled: boolean) => {
+    setDialogEnabled(enabled);
+    localStorage.setItem(END_DAY_DIALOG_KEY, String(enabled));
+  };
+
+  const handleEndDayClick = () => {
+    dismissAreaMapPopups();
+    if (dialogEnabled) {
+      setEndDayOpen(true);
+    } else {
+      endDay();
+    }
+  };
 
   const aliveSurvivors = Object.values(survivors).filter((s) => s.health > 0);
   const totalSurvivors = aliveSurvivors.length;
@@ -131,8 +156,29 @@ export function TopBar() {
               {day}
             </div>
           </div>
+
+          <div
+            className="flex items-center gap-1.5"
+            title="Show end-of-day preview dialog"
+          >
+            <Checkbox
+              id="end-day-dialog"
+              checked={dialogEnabled}
+              onCheckedChange={(checked) =>
+                setDialogPreference(checked === true)
+              }
+              className="border-stone-600 data-[state=checked]:bg-amber-700 data-[state=checked]:border-amber-600"
+            />
+            <label
+              htmlFor="end-day-dialog"
+              className="text-[10px] text-stone-500 cursor-pointer select-none hidden sm:inline"
+            >
+              Preview
+            </label>
+          </div>
+
           <Button
-            onClick={() => setEndDayOpen(true)}
+            onClick={handleEndDayClick}
             className="bg-amber-700 hover:bg-amber-600 text-amber-50 border border-amber-600/50 shadow-lg shadow-amber-900/30"
             size="sm"
           >

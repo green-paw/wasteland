@@ -2,11 +2,11 @@
 
 import { Canvas, useFrame } from "@react-three/fiber";
 import { MapControls, Line, Html } from "@react-three/drei";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import * as THREE from "three";
 import { useGameStore, isSurvivorAvailableForDispatch } from "@/game/store";
 import { getMaxTeamSize, LOCATION_DEFS, ENEMY_INFO, RESOURCE_INFO, getLocationEnemyPower, getTeamCombatPower } from "@/game/data";
-import { GameLocation, LocationType, Survivor, AreaType, EnemyType } from "@/game/types";
+import { GameLocation, LocationType, Survivor, AreaType, EnemyType, MapFloaterEvent } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CharacterIcon } from "./CharacterIcon";
@@ -1345,6 +1345,113 @@ function MissionLines() {
   );
 }
 
+// ---------- End-day floating numbers on buildings ----------
+function MapFloater({
+  position,
+  lines,
+  kind,
+  onDone,
+}: {
+  position: [number, number, number];
+  lines: MapFloaterEvent["lines"];
+  kind: MapFloaterEvent["kind"];
+  onDone: () => void;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const startRef = useRef<number | null>(null);
+  const doneRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isLoss = kind === "raid";
+  const colorClass = isLoss ? "text-red-400" : "text-emerald-400";
+  const prefix = isLoss ? "-" : "+";
+
+  useFrame((state) => {
+    if (doneRef.current) return;
+    if (startRef.current === null) startRef.current = state.clock.elapsedTime;
+    const elapsed = state.clock.elapsedTime - startRef.current;
+    const rise = elapsed * 1.6;
+    if (groupRef.current) {
+      groupRef.current.position.set(
+        position[0],
+        position[1] + rise,
+        position[2]
+      );
+    }
+    if (containerRef.current) {
+      containerRef.current.style.opacity = String(
+        Math.max(0, 1 - elapsed / 2.2)
+      );
+    }
+    if (elapsed > 2.2) {
+      doneRef.current = true;
+      onDone();
+    }
+  });
+
+  return (
+    <group ref={groupRef} position={position}>
+      <Html center distanceFactor={14} zIndexRange={[200, 0]}>
+        <div
+          ref={containerRef}
+          className="flex flex-col items-center gap-0.5 select-none pointer-events-none"
+        >
+          {lines.map((line) => (
+            <div
+              key={line.resource}
+              className={`flex items-center gap-1 text-base font-bold tabular-nums drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] ${colorClass}`}
+            >
+              <span className="text-sm leading-none">
+                {RESOURCE_INFO[line.resource].icon}
+              </span>
+              <span>
+                {prefix}
+                {line.amount}
+              </span>
+            </div>
+          ))}
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+function MapFloaterLayer({
+  locations,
+}: {
+  locations: GameLocation[];
+}) {
+  const currentAreaId = useGameStore((s) => s.currentAreaId);
+  const areaMapFloaters = useGameStore((s) => s.areaMapFloaters);
+  const clearAreaMapFloater = useGameStore((s) => s.clearAreaMapFloater);
+
+  const activeFloaters = areaMapFloaters.filter(
+    (f) => f.areaId === currentAreaId
+  );
+
+  return (
+    <>
+      {activeFloaters.map((f) => {
+        const loc = locations.find((l) => l.id === f.locationId);
+        if (!loc) return null;
+        const pos: [number, number, number] = [
+          loc.position[0],
+          2.8,
+          loc.position[2],
+        ];
+        return (
+          <MapFloater
+            key={f.id}
+            position={pos}
+            lines={f.lines}
+            kind={f.kind}
+            onDone={() => clearAreaMapFloater(f.id)}
+          />
+        );
+      })}
+    </>
+  );
+}
+
 // ---------- 3D Scene ----------
 function Scene({
   selectedLocationId,
@@ -1459,6 +1566,7 @@ function Scene({
       })}
 
       <MissionLines />
+      <MapFloaterLayer locations={locations} />
 
       <MapControls
         enableRotate={false}
@@ -1482,6 +1590,7 @@ export function AreaMapView() {
   const sendSurvivorsToLocation = useGameStore(
     (s) => s.sendSurvivorsToLocation
   );
+  const areaMapDismissSignal = useGameStore((s) => s.areaMapDismissSignal);
 
   const missions = area?.missions ?? [];
   const survivors = (area?.survivorIds ?? [])
@@ -1500,7 +1609,14 @@ export function AreaMapView() {
   const dismissPopups = () => {
     setHoveredLocationId(null);
     setSelectedLocationId(null);
+    setManualLocationId(null);
+    setManualSelectedSurvivorIds([]);
   };
+
+  useEffect(() => {
+    if (areaMapDismissSignal === 0) return;
+    dismissPopups();
+  }, [areaMapDismissSignal]);
 
   const availableSurvivors = survivors.filter((s) =>
     area ? isSurvivorAvailableForDispatch(area, s) : false
