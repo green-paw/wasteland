@@ -111,6 +111,21 @@ export interface GameLogEntry {
   type: "info" | "success" | "warning" | "danger";
 }
 
+export type NightReportKind =
+  | "death"
+  | "critical"
+  | "injury"
+  | "raid"
+  | "needs"
+  | "event";
+
+export interface NightReportItem {
+  id: string;
+  kind: NightReportKind;
+  severity: "danger" | "warning" | "info";
+  message: string;
+}
+
 /** Short-lived popup on the area map after End Day (scout/salvage loot / raid losses). */
 export interface MapFloaterLine {
   resource: ResourceType;
@@ -193,6 +208,8 @@ export interface GameState {
   log: GameLogEntry[];
   areaMapFloaters: MapFloaterEvent[];
   areaMapDismissSignal: number;
+  lastNightDay: number;
+  lastNightReport: NightReportItem[];
   gameOver: boolean;
   gameOverReason?: string;
 }

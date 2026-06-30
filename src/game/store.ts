@@ -37,6 +37,7 @@ import {
   LOCATION_DEFS,
   RESOURCE_ORDER,
 } from "./data";
+import { buildLastNightReport } from "./nightReport";
 import {
   expandWorldAroundHex,
   generateAreaLocations,
@@ -435,6 +436,8 @@ function createInitialState(): GameState {
     gameOver: false,
     areaMapFloaters: [],
     areaMapDismissSignal: 0,
+    lastNightDay: 0,
+    lastNightReport: [],
   };
 }
 
@@ -1705,6 +1708,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
         };
       }
 
+      const lastNightReport = buildLastNightReport(
+        newLog,
+        day,
+        allSurvivors,
+        newAreas
+      );
+
       return {
         ...state,
         day: nextDay,
@@ -1713,6 +1723,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         transfers: remainingTransfers,
         log: newLog.slice(-120),
         areaMapFloaters,
+        lastNightDay: day,
+        lastNightReport,
         gameOver,
         gameOverReason,
       };

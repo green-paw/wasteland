@@ -120,3 +120,21 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes night-report-scroll-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.night-report-scroll-in {
+  animation: night-report-scroll-in 1.2s ease-out forwards;
+}

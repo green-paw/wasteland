@@ -9,6 +9,7 @@ import { WorldMapHexView } from "@/components/game/WorldMapHexView";
 import { IntroScreen } from "@/components/game/IntroScreen";
 import { GameOverScreen } from "@/components/game/GameOverScreen";
 import { GameLogPanel } from "@/components/game/GameLogPanel";
+import { LastNightPanel } from "@/components/game/LastNightPanel";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Globe, Map, Home as HomeIcon, Users } from "lucide-react";
 import { useState } from "react";
@@ -83,6 +84,7 @@ export default function Home() {
       </Tabs>
 
       {gameOver && <GameOverScreen />}
+      <LastNightPanel />
     </div>
   );
 }
