@@ -71,6 +71,36 @@ function weightedPick(
   return entries[entries.length - 1][0];
 }
 
+function distance2D(a: [number, number], b: [number, number]): number {
+  const dx = a[0] - b[0];
+  const dz = a[1] - b[1];
+  return Math.sqrt(dx * dx + dz * dz);
+}
+
+function samplePositionWithMinDistance(
+  rng: () => number,
+  used: [number, number][],
+  minRadius: number,
+  maxRadius: number,
+  minDistance: number
+): { angle: number; radius: number; x: number; z: number } {
+  // Best-effort Poisson-like sampling with graceful fallback if space is tight.
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const angle = rng() * Math.PI * 2;
+    const radius = minRadius + rng() * (maxRadius - minRadius);
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    const overlaps = used.some((p) => distance2D([x, z], p) < minDistance);
+    if (!overlaps) return { angle, radius, x, z };
+  }
+
+  const angle = rng() * Math.PI * 2;
+  const radius = minRadius + rng() * (maxRadius - minRadius);
+  const x = Math.cos(angle) * radius;
+  const z = Math.sin(angle) * radius;
+  return { angle, radius, x, z };
+}
+
 // ---------- Generate locations for an area (called when discovered) ----------
 export function generateAreaLocations(
   areaId: string,
@@ -83,6 +113,8 @@ export function generateAreaLocations(
   const numLocations = randInt(rng, def.locationCount[0], def.locationCount[1]);
   const locations: GameLocation[] = [];
   const usedAngles: number[] = [];
+  const usedPositions: [number, number][] = [];
+  const minLocationSpacing = 4.2;
 
   // Force at least 1 safe location near the area's base (danger 1-2).
   // For the starting area, this location is guaranteed to have exactly 1 enemy
@@ -91,8 +123,13 @@ export function generateAreaLocations(
   {
     const type = pick(rng, safeTypes);
     const locDef = LOCATION_DEFS[type];
-    const angle = rng() * Math.PI * 2;
-    const radius = 6 + rng() * 3;
+    const { angle, radius, x, z } = samplePositionWithMinDistance(
+      rng,
+      usedPositions,
+      4.5,
+      7.5,
+      minLocationSpacing
+    );
     const danger = Math.min(2, locDef.baseDanger);
     const enemyType = pick(rng, locDef.enemyTypes);
     // Starting area: exactly 1 enemy. Other areas: danger + 0-1.
@@ -109,7 +146,7 @@ export function generateAreaLocations(
       id: `loc_${areaId}_safe_${Math.floor(rng() * 100000)}`,
       name: locDef.label,
       type,
-      position: [Math.cos(angle) * radius, 0, Math.sin(angle) * radius],
+      position: [x, 0, z],
       dangerLevel: danger,
       enemyType,
       enemyCount,
@@ -124,6 +161,7 @@ export function generateAreaLocations(
       distance: 0.5,
     });
     usedAngles.push(angle);
+    usedPositions.push([x, z]);
   }
 
   // Remaining locations: weighted by area type
@@ -143,9 +181,17 @@ export function generateAreaLocations(
     }
     usedAngles.push(angle);
 
-    const radius = 7 + rng() * 12;
-    const x = Math.cos(angle) * radius;
-    const z = Math.sin(angle) * radius;
+    const sampled = samplePositionWithMinDistance(
+      rng,
+      usedPositions,
+      5.5,
+      11.5,
+      minLocationSpacing
+    );
+    angle = sampled.angle;
+    const radius = sampled.radius;
+    const x = sampled.x;
+    const z = sampled.z;
 
     const danger = Math.min(
       5,
@@ -181,6 +227,7 @@ export function generateAreaLocations(
       cleared: false,
       distance,
     });
+    usedPositions.push([x, z]);
   }
 
   return locations;
