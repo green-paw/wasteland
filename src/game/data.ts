@@ -315,8 +315,37 @@ export function getBaseDefense(
   return { tower, guards, total: tower + guards };
 }
 
+const REST_HEAL_BY_STATUS: Record<Exclude<SurvivorStatus, "healthy">, number> =
+  {
+    injured: 10,
+    sick: 5,
+    critical: 15,
+  };
+
+/** Injury tier for bed-rest healing — uses HP so stale "healthy" status still heals. */
+export function getRestHealTier(
+  survivor: Survivor
+): Exclude<SurvivorStatus, "healthy"> | null {
+  if (survivor.health >= 100) return null;
+  if (survivor.status === "sick") return "sick";
+  if (survivor.health < 25 || survivor.status === "critical") return "critical";
+  return "injured";
+}
+
+export function syncSurvivorStatusFromHealth(survivor: Survivor): void {
+  if (survivor.health <= 0) return;
+  if (survivor.status === "sick") return;
+  if (survivor.health < 25) {
+    survivor.status = "critical";
+  } else if (survivor.health < 70) {
+    survivor.status = "injured";
+  } else {
+    survivor.status = "healthy";
+  }
+}
+
 export function survivorNeedsIntensiveCare(survivor: Survivor): boolean {
-  return survivor.role === "resting" && survivor.status !== "healthy";
+  return survivor.role === "resting" && getRestHealTier(survivor) !== null;
 }
 
 export function getSurvivorDailyRations(survivor: Survivor): {
@@ -348,20 +377,16 @@ export function getAreaConsumption(survivors: Survivor[]): {
   );
 }
 
-const REST_HEAL_BY_STATUS: Record<Exclude<SurvivorStatus, "healthy">, number> =
-  {
-    injured: 10,
-    sick: 5,
-    critical: 15,
-  };
-
 export function getRestHealAmount(
   survivor: Survivor,
   infirmaryLevel: number
 ): number {
-  if (survivor.role !== "resting" || survivor.status === "healthy") return 0;
+  if (survivor.role !== "resting") return 0;
 
-  const base = REST_HEAL_BY_STATUS[survivor.status];
+  const tier = getRestHealTier(survivor);
+  if (!tier) return 0;
+
+  const base = REST_HEAL_BY_STATUS[tier];
   const infirmaryBonus = infirmaryLevel * INFIRMARY_HEAL_PER_LEVEL;
   const medicalBonus = Math.floor(survivor.skills.medical / 10);
   return base + infirmaryBonus + medicalBonus;

@@ -69,10 +69,10 @@ export default function Home() {
           </TabsContent>
 
           <TabsContent value="area" className="mt-0">
-            <AreaMapView />
+            <AreaMapView onOpenBase={() => setTab("base")} />
           </TabsContent>
 
-          <TabsContent value="base" className="mt-0 space-y-4">
+          <TabsContent value="base" className="mt-0 space-y-2">
             <BaseView />
             <GameLogPanel />
           </TabsContent>

@@ -1466,6 +1466,7 @@ function Scene({
   onOpenManualLocation,
   onClaimBase,
   onCancelMission,
+  onOpenBase,
 }: {
   selectedLocationId: string | null;
   hoveredLocationId: string | null;
@@ -1479,6 +1480,7 @@ function Scene({
   onOpenManualLocation: (locationId: string) => void;
   onClaimBase: (locationId: string) => void;
   onCancelMission: (locationId: string) => void;
+  onOpenBase?: () => void;
 }) {
   const area = useGameStore((s) => s.areas[s.currentAreaId]);
   const allSurvivors = useGameStore((s) => s.survivors);
@@ -1557,6 +1559,15 @@ function Scene({
             }
             onClick={() => {
               onHoverLocation(null);
+              if (
+                area?.hasBase &&
+                area.baseLocationId === loc.id &&
+                onOpenBase
+              ) {
+                onDismissPopups();
+                onOpenBase();
+                return;
+              }
               onSelectLocation(
                 selectedLocationId === loc.id ? null : loc.id
               );
@@ -1582,7 +1593,7 @@ function Scene({
 }
 
 // ---------- Main Area Map View ----------
-export function AreaMapView() {
+export function AreaMapView({ onOpenBase }: { onOpenBase?: () => void } = {}) {
   const area = useGameStore((s) => s.areas[s.currentAreaId]);
   const allSurvivors = useGameStore((s) => s.survivors);
   const clearTeamLocation = useGameStore((s) => s.clearTeamLocation);
@@ -1685,6 +1696,7 @@ export function AreaMapView() {
           onOpenManualLocation={handleOpenManual}
           onClaimBase={handleClaimBase}
           onCancelMission={handleCancelMission}
+          onOpenBase={onOpenBase}
         />
       </Canvas>
 

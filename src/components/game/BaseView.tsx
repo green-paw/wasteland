@@ -1,7 +1,14 @@
 "use client";
 
 import { useGameStore, selectSurvivorCapacity } from "@/game/store";
-import { BUILDING_DEFS, getUpgradeCost, RESOURCE_INFO, getBaseDefense, getAreaConsumption, INFIRMARY_HEAL_PER_LEVEL } from "@/game/data";
+import {
+  BUILDING_DEFS,
+  getUpgradeCost,
+  RESOURCE_INFO,
+  getBaseDefense,
+  getAreaConsumption,
+  INFIRMARY_HEAL_PER_LEVEL,
+} from "@/game/data";
 import { BuildingType, Survivor } from "@/game/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,7 +24,6 @@ import {
   CheckCircle2,
   AlertCircle,
   MapPin,
-  Wheat,
 } from "lucide-react";
 import { CharacterIcon } from "./CharacterIcon";
 
@@ -50,14 +56,13 @@ export function BaseView() {
 
   const capacity = selectSurvivorCapacity(area);
 
-  // No base established in this area — show guidance instead of the base UI.
   if (!area.hasBase) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-2">
         <AreaHeader name={area.name} />
-        <Card className="bg-stone-900/60 border-stone-800 p-6 flex flex-col items-center text-center">
-          <AlertCircle className="w-8 h-8 text-amber-400 mb-2" />
-          <p className="text-sm text-stone-300 max-w-md">
+        <Card className="bg-stone-900/60 border-stone-800 p-4 flex flex-col items-center text-center">
+          <AlertCircle className="w-6 h-6 text-amber-400 mb-1.5" />
+          <p className="text-xs text-stone-300 max-w-md">
             No base established in this area. Clear a location in the Area Map
             and claim it as your base.
           </p>
@@ -67,111 +72,92 @@ export function BaseView() {
   }
 
   const injuredSurvivors = survivors.filter(
-    (s) => s.status === "injured" || s.status === "critical" || s.status === "sick"
+    (s) =>
+      s.status === "injured" || s.status === "critical" || s.status === "sick"
   );
 
-  // Daily production values (shown in the summary card)
   const farmFood = buildings.farm.level * 5;
   const wellWater = buildings.well.level * 5;
   const baseDefense = getBaseDefense(buildings.watchtower.level, survivors);
   const dailyConsumption = getAreaConsumption(survivors);
   const infirmaryBonus = buildings.infirmary.level * INFIRMARY_HEAL_PER_LEVEL;
+  const foodNet = farmFood - dailyConsumption.food;
+  const waterNet = wellWater - dailyConsumption.water;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       <AreaHeader name={area.name} />
 
-      {/* Overview cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <OverviewCard
-          icon={<Users className="w-5 h-5 text-emerald-400" />}
-          label="Survivors"
-          value={`${survivors.length} / ${capacity}`}
-          sublabel={survivors.length >= capacity ? "Full" : "Slots open"}
-          tone={survivors.length >= capacity ? "warning" : "ok"}
-        />
-        <OverviewCard
-          icon={<HeartPulse className="w-5 h-5 text-rose-400" />}
-          label="Injured"
-          value={injuredSurvivors.length.toString()}
-          sublabel={
-            injuredSurvivors.length === 0
-              ? "All healthy"
-              : "Rest injured for recovery"
-          }
-          tone={injuredSurvivors.length > 0 ? "warning" : "ok"}
-        />
-        <OverviewCard
-          icon={<ShieldAlert className="w-5 h-5 text-amber-400" />}
-          label="Defense"
-          value={baseDefense.total.toString()}
-          sublabel={`Tower ${baseDefense.tower} + Guards ${baseDefense.guards}`}
-          tone="ok"
-        />
-        <OverviewCard
-          icon={<Hammer className="w-5 h-5 text-stone-300" />}
-          label="Buildings"
-          value={`${Object.values(buildings).filter((b) => b.level > 0).length} / 8`}
-          sublabel="Operational"
-          tone="ok"
-        />
-      </div>
+      {/* Stats + daily summary */}
+      <Card className="bg-stone-900/60 border-stone-800 p-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
+          <StatChip
+            icon={<Users className="w-3.5 h-3.5 text-emerald-400" />}
+            label="Survivors"
+            value={`${survivors.length}/${capacity}`}
+            warn={survivors.length >= capacity}
+          />
+          <StatChip
+            icon={<HeartPulse className="w-3.5 h-3.5 text-rose-400" />}
+            label="Injured"
+            value={String(injuredSurvivors.length)}
+            warn={injuredSurvivors.length > 0}
+          />
+          <StatChip
+            icon={<ShieldAlert className="w-3.5 h-3.5 text-amber-400" />}
+            label="Defense"
+            value={String(baseDefense.total)}
+            hint={`${baseDefense.tower}+${baseDefense.guards}`}
+          />
+          <StatChip
+            icon={<Hammer className="w-3.5 h-3.5 text-stone-400" />}
+            label="Built"
+            value={`${Object.values(buildings).filter((b) => b.level > 0).length}/8`}
+          />
+        </div>
 
-      {/* Daily production/consumption summary */}
-      <Card className="bg-stone-900/60 border-stone-800 p-3">
-        <div className="text-xs uppercase tracking-wide text-stone-500 mb-2 flex items-center gap-1.5">
-          <Wheat className="w-3.5 h-3.5 text-amber-400" />
-          Daily Production (next End Day)
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-          <div className="flex items-center justify-between bg-stone-950/40 rounded px-2 py-1">
-            <span className="text-stone-400">🍔 Food</span>
-            <span className={farmFood - dailyConsumption.food >= 0 ? "text-emerald-300" : "text-red-300"}>
-              {farmFood > 0 ? `+${farmFood}` : "+0"}
-              {survivors.length > 0 && ` − ${dailyConsumption.food}`} ={" "}
-              {farmFood - dailyConsumption.food >= 0 ? "+" : ""}
-              {farmFood - dailyConsumption.food}
+        <div className="mt-2 pt-2 border-t border-stone-800 grid grid-cols-1 sm:grid-cols-3 gap-1 text-[11px]">
+          <div className="flex items-center justify-between gap-2 bg-stone-950/40 rounded px-1.5 py-0.5">
+            <span className="text-stone-500 shrink-0">🍔 Food</span>
+            <span
+              className={`tabular-nums ${foodNet >= 0 ? "text-emerald-300" : "text-red-300"}`}
+            >
+              +{farmFood} −{dailyConsumption.food} = {foodNet >= 0 ? "+" : ""}
+              {foodNet}
             </span>
           </div>
-          <div className="flex items-center justify-between bg-stone-950/40 rounded px-2 py-1">
-            <span className="text-stone-400">💧 Water</span>
-            <span className={wellWater - dailyConsumption.water >= 0 ? "text-emerald-300" : "text-red-300"}>
-              {wellWater > 0 ? `+${wellWater}` : "+0"}
-              {survivors.length > 0 && ` − ${dailyConsumption.water}`} ={" "}
-              {wellWater - dailyConsumption.water >= 0 ? "+" : ""}
-              {wellWater - dailyConsumption.water}
+          <div className="flex items-center justify-between gap-2 bg-stone-950/40 rounded px-1.5 py-0.5">
+            <span className="text-stone-500 shrink-0">💧 Water</span>
+            <span
+              className={`tabular-nums ${waterNet >= 0 ? "text-emerald-300" : "text-red-300"}`}
+            >
+              +{wellWater} −{dailyConsumption.water} ={" "}
+              {waterNet >= 0 ? "+" : ""}
+              {waterNet}
             </span>
           </div>
-          <div className="flex items-center justify-between bg-stone-950/40 rounded px-2 py-1">
-            <span className="text-stone-400">⚕️ Infirmary</span>
-            <span className="text-stone-300">
-              {infirmaryBonus > 0
-                ? `+${infirmaryBonus} HP resting`
-                : "rest to heal"}
+          <div className="flex items-center justify-between gap-2 bg-stone-950/40 rounded px-1.5 py-0.5">
+            <span className="text-stone-500 shrink-0">⚕️ Heal</span>
+            <span className="text-stone-300 tabular-nums">
+              {infirmaryBonus > 0 ? `+${infirmaryBonus} resting` : "rest"}
             </span>
           </div>
         </div>
-        {(farmFood - dailyConsumption.food < 0 ||
-          wellWater - dailyConsumption.water < 0) && (
-          <div className="mt-2 text-[11px] text-red-400 flex items-center gap-1">
-            <AlertCircle className="w-3 h-3" />
-            Warning: production does not cover daily consumption. Survivors will go hungry/thirsty.
-          </div>
-        )}
-        {farmFood === 0 && wellWater === 0 && (
-          <div className="mt-2 text-[11px] text-amber-400 flex items-center gap-1">
-            <AlertCircle className="w-3 h-3" />
-            No production buildings yet. Build a Farm and Well to produce food and water each day.
-          </div>
+
+        {(foodNet < 0 || waterNet < 0) && (
+          <p className="mt-1.5 text-[10px] text-red-400 flex items-center gap-1">
+            <AlertCircle className="w-3 h-3 shrink-0" />
+            Production won&apos;t cover consumption tonight.
+          </p>
         )}
       </Card>
 
-      {/* Buildings list */}
+      {/* Buildings */}
       <div>
-        <h2 className="text-sm uppercase tracking-wide text-stone-500 mb-2 px-1">
-          Base Buildings
+        <h2 className="text-[10px] uppercase tracking-wide text-stone-500 mb-1 px-0.5">
+          Buildings
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-1.5">
           {BUILDING_ORDER.map((type) => {
             const def = BUILDING_DEFS[type];
             const building = buildings[type];
@@ -183,10 +169,11 @@ export function BaseView() {
               buildings.workshop.level
             );
             const canAfford = Object.entries(cost).every(
-              ([k, v]) => resources[k as keyof typeof resources] >= (v as number)
+              ([k, v]) =>
+                resources[k as keyof typeof resources] >= (v as number)
             );
             const hpPct = (building.hp / building.maxHp) * 100;
-            const damaged = building.hp < building.maxHp;
+            const damaged = isBuilt && building.hp < building.maxHp;
             const repairCost = damaged
               ? { materials: Math.ceil((building.maxHp - building.hp) / 5) }
               : null;
@@ -197,170 +184,150 @@ export function BaseView() {
             return (
               <Card
                 key={type}
-                className="bg-stone-900/60 border-stone-800 p-4 hover:border-stone-700 transition-colors"
+                className="bg-stone-900/60 border-stone-800 p-2 hover:border-stone-700 transition-colors"
               >
-                <div className="flex items-start gap-3">
+                <div className="flex items-center gap-2 min-w-0">
                   <div
-                    className={`w-12 h-12 rounded grid place-items-center text-2xl flex-shrink-0 ${
+                    className={`w-8 h-8 rounded grid place-items-center text-lg shrink-0 ${
                       isBuilt
                         ? "bg-stone-800 border border-stone-700"
                         : "bg-stone-950 border border-stone-800 opacity-50"
                     }`}
+                    title={def.description}
                   >
                     {def.icon}
                   </div>
+
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-semibold text-stone-100 text-sm">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-xs font-medium text-stone-100 truncate">
                         {def.label}
-                      </div>
+                      </span>
                       <Badge
                         variant="outline"
-                        className={`text-xs ${
+                        className={`text-[10px] px-1 py-0 h-4 shrink-0 ${
                           isBuilt
                             ? "border-emerald-800 text-emerald-300 bg-emerald-950/40"
                             : "border-stone-700 text-stone-500"
                         }`}
                       >
-                        {isBuilt ? `Lv ${building.level}` : "Not Built"}
+                        {isBuilt ? `Lv${building.level}` : "—"}
                       </Badge>
                     </div>
-                    <p className="text-xs text-stone-400 mt-0.5 leading-snug">
-                      {def.description}
-                    </p>
-                  </div>
-                </div>
-
-                {isBuilt && (
-                  <div className="mt-3 space-y-1">
-                    <div className="flex items-center justify-between text-[10px] text-stone-500">
-                      <span>STRUCTURAL HP</span>
-                      <span>
-                        {building.hp} / {building.maxHp}
-                      </span>
-                    </div>
-                    <Progress
-                      value={hpPct}
-                      className={`h-1.5 ${
-                        hpPct < 30 ? "[&>div]:bg-red-500" : "[&>div]:bg-emerald-700"
-                      }`}
-                    />
-                  </div>
-                )}
-
-                <div className="mt-3 flex items-center gap-2 flex-wrap">
-                  {isBuilt && (
-                    <div className="text-[10px] text-stone-500 mr-auto">
-                      {def.effects[0]}
-                    </div>
-                  )}
-                  {!isBuilt && (
-                    <div className="text-[10px] text-stone-600 mr-auto">
-                      Build to unlock
-                    </div>
-                  )}
-
-                  {!isMaxed && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!canAfford}
-                      onClick={() => upgradeBuilding(type)}
-                      className={`h-7 text-xs ${
-                        canAfford
-                          ? "border-amber-800 bg-amber-950/40 text-amber-200 hover:bg-amber-900/50"
-                          : "border-stone-800 text-stone-600"
-                      }`}
+                    <p
+                      className="text-[10px] text-stone-500 truncate"
+                      title={def.description}
                     >
-                      <ArrowUp className="w-3 h-3 mr-1" />
-                      {isBuilt ? "Upgrade" : "Build"}
-                      <span className="ml-1.5 flex items-center gap-1">
+                      {isBuilt ? def.effects[0] : "Not built"}
+                    </p>
+                    {damaged && (
+                      <Progress
+                        value={hpPct}
+                        className={`h-1 mt-1 ${
+                          hpPct < 30
+                            ? "[&>div]:bg-red-500"
+                            : "[&>div]:bg-emerald-700"
+                        }`}
+                      />
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!isMaxed && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!canAfford}
+                        onClick={() => upgradeBuilding(type)}
+                        className={`h-6 px-1.5 text-[10px] ${
+                          canAfford
+                            ? "border-amber-800 bg-amber-950/40 text-amber-200 hover:bg-amber-900/50"
+                            : "border-stone-800 text-stone-600"
+                        }`}
+                        title={
+                          !canAfford
+                            ? "Not enough resources"
+                            : isBuilt
+                              ? "Upgrade"
+                              : "Build"
+                        }
+                      >
+                        <ArrowUp className="w-3 h-3" />
                         {Object.entries(cost).map(([k, v]) => (
-                          <span key={k} className="flex items-center gap-0.5">
-                            <span>{RESOURCE_INFO[k as keyof typeof RESOURCE_INFO].icon}</span>
-                            <span>{v}</span>
+                          <span key={k} className="ml-0.5">
+                            {RESOURCE_INFO[k as keyof typeof RESOURCE_INFO].icon}
+                            {v}
                           </span>
                         ))}
-                      </span>
-                    </Button>
-                  )}
-
-                  {isMaxed && (
-                    <div className="text-xs text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> Max
-                    </div>
-                  )}
-
-                  {damaged && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!canRepair}
-                      onClick={() => repairBuilding(type)}
-                      className={`h-7 text-xs ${
-                        canRepair
-                          ? "border-stone-700 text-stone-200 hover:bg-stone-800"
-                          : "border-stone-800 text-stone-600"
-                      }`}
-                    >
-                      <Wrench className="w-3 h-3 mr-1" />
-                      Repair
-                      {repairCost && (
-                        <span className="ml-1.5 flex items-center gap-0.5">
-                          <span>{RESOURCE_INFO.materials.icon}</span>
-                          <span>{repairCost.materials}</span>
-                        </span>
-                      )}
-                    </Button>
-                  )}
-                </div>
-
-                {!canAfford && !isMaxed && (
-                  <div className="mt-1.5 flex items-center gap-1 text-[10px] text-red-400">
-                    <AlertCircle className="w-3 h-3" />
-                    Not enough resources
+                      </Button>
+                    )}
+                    {isMaxed && (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    )}
+                    {damaged && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!canRepair}
+                        onClick={() => repairBuilding(type)}
+                        className={`h-6 px-1.5 text-[10px] ${
+                          canRepair
+                            ? "border-stone-700 text-stone-200"
+                            : "border-stone-800 text-stone-600"
+                        }`}
+                      >
+                        <Wrench className="w-3 h-3" />
+                        {repairCost?.materials}
+                      </Button>
+                    )}
                   </div>
-                )}
+                </div>
               </Card>
             );
           })}
         </div>
       </div>
 
-      {/* Survivor roster at base */}
+      {/* Roster */}
       <div>
-        <h2 className="text-sm uppercase tracking-wide text-stone-500 mb-2 px-1">
-          Survivor Roster
+        <h2 className="text-[10px] uppercase tracking-wide text-stone-500 mb-1 px-0.5">
+          Roster
+          {survivors.length > 0 && (
+            <span className="text-stone-600 font-normal normal-case ml-1">
+              ({survivors.length})
+            </span>
+          )}
         </h2>
+
         {survivors.length === 0 ? (
-          <Card className="bg-stone-900/60 border-stone-800 p-6 text-center">
-            <p className="text-sm text-stone-300">
-              No survivors in this area. Send some from the World Map.
+          <Card className="bg-stone-900/60 border-stone-800 p-3 text-center">
+            <p className="text-xs text-stone-400">
+              No survivors in this area.
             </p>
           </Card>
         ) : (
-          <Card className="bg-stone-900/60 border-stone-800 p-3 space-y-3">
+          <Card className="bg-stone-900/60 border-stone-800 p-2 space-y-2">
             {pendingMissions.length > 0 && (
-              <div className="rounded border border-stone-800 bg-stone-950/40 p-2">
-                <div className="text-[10px] uppercase tracking-wide text-stone-500 mb-1.5">
-                  Pending Missions ({pendingMissions.length})
-                </div>
-                <div className="space-y-1">
-                  {pendingMissions.map((m) => {
-                    const location = area.locations.find((l) => l.id === m.locationId);
-                    return (
-                      <div key={m.id} className="text-xs text-stone-300">
-                        <span className="text-amber-300">
-                          {m.missionType === "salvage" ? "Salvage" : "Scout"}
-                        </span>{" "}
-                        {location?.name ?? "Unknown location"} ({m.team.length})
-                      </div>
-                    );
-                  })}
-                </div>
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-stone-400 pb-1.5 border-b border-stone-800">
+                <span className="text-stone-500 uppercase tracking-wide shrink-0">
+                  Missions:
+                </span>
+                {pendingMissions.map((m) => {
+                  const location = area.locations.find(
+                    (l) => l.id === m.locationId
+                  );
+                  return (
+                    <span key={m.id} className="text-stone-300">
+                      <span className="text-amber-300">
+                        {m.missionType === "salvage" ? "Salvage" : "Scout"}
+                      </span>{" "}
+                      {location?.name ?? "?"} ({m.team.length})
+                    </span>
+                  );
+                })}
               </div>
             )}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1.5">
               {survivors.map((s) => (
                 <SurvivorMiniCard key={s.id} survivor={s} />
               ))}
@@ -374,90 +341,90 @@ export function BaseView() {
 
 function AreaHeader({ name }: { name: string }) {
   return (
-    <div className="flex items-center gap-2 px-1">
-      <MapPin className="w-4 h-4 text-stone-500" />
-      <h2 className="text-base font-semibold text-stone-100">{name}</h2>
+    <div className="flex items-center gap-1.5 px-0.5">
+      <MapPin className="w-3.5 h-3.5 text-stone-500 shrink-0" />
+      <h2 className="text-sm font-semibold text-stone-100 truncate">{name}</h2>
     </div>
   );
 }
 
-function OverviewCard({
+function StatChip({
   icon,
   label,
   value,
-  sublabel,
-  tone,
+  hint,
+  warn,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
-  sublabel: string;
-  tone: "ok" | "warning";
+  hint?: string;
+  warn?: boolean;
 }) {
   return (
-    <Card className="bg-stone-900/60 border-stone-800 p-3">
-      <div className="flex items-center gap-2">
+    <div className="bg-stone-950/40 rounded px-2 py-1.5 min-w-0">
+      <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-stone-500">
         {icon}
-        <div className="text-[10px] uppercase tracking-wide text-stone-500">
-          {label}
-        </div>
+        <span className="truncate">{label}</span>
       </div>
       <div
-        className={`text-2xl font-bold mt-1 ${
-          tone === "warning" ? "text-amber-300" : "text-stone-100"
+        className={`text-base font-bold tabular-nums leading-tight ${
+          warn ? "text-amber-300" : "text-stone-100"
         }`}
       >
         {value}
       </div>
-      <div className="text-[10px] text-stone-500 mt-0.5">{sublabel}</div>
-    </Card>
+      {hint && (
+        <div className="text-[9px] text-stone-600 tabular-nums">{hint}</div>
+      )}
+    </div>
   );
 }
 
 function SurvivorMiniCard({ survivor }: { survivor: Survivor }) {
   const statusColor =
     survivor.status === "critical"
-      ? "border-red-600 bg-red-950/40"
+      ? "border-red-600/80 bg-red-950/30"
       : survivor.status === "injured"
-      ? "border-orange-700 bg-orange-950/30"
-      : survivor.status === "sick"
-      ? "border-yellow-700 bg-yellow-950/30"
-      : "border-stone-700 bg-stone-900/40";
+        ? "border-orange-700/80 bg-orange-950/25"
+        : survivor.status === "sick"
+          ? "border-yellow-700/80 bg-yellow-950/25"
+          : "border-stone-800 bg-stone-950/40";
 
   const roleLabel =
     survivor.role === "resting"
-      ? "Resting"
+      ? "Rest"
       : survivor.role === "onMission"
-      ? "On Mission"
-      : survivor.role === "working"
-      ? "Assigned"
-      : survivor.role === "guarding"
-      ? "Guarding"
-      : "Idle";
+        ? "Mission"
+        : survivor.role === "working"
+          ? "Work"
+          : survivor.role === "guarding"
+            ? "Guard"
+            : "Idle";
 
   return (
     <div
-      className={`flex items-center gap-2 p-2 rounded border ${statusColor}`}
+      className={`flex items-center gap-1.5 p-1.5 rounded border ${statusColor}`}
+      title={`${survivor.name} — ${survivor.status}, ${roleLabel}`}
     >
-      <CharacterIcon seed={survivor.iconSeed} size={32} />
+      <CharacterIcon seed={survivor.iconSeed} size={24} className="shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium text-stone-100 truncate">
+        <div className="text-[11px] font-medium text-stone-100 truncate leading-tight">
           {survivor.name}
         </div>
-        <div className="text-[10px] text-stone-400">{roleLabel}</div>
-        <div className="mt-0.5 flex items-center gap-1">
-          <HeartPulse className="w-2.5 h-2.5 text-rose-400" />
-          <Progress
-            value={survivor.health}
-            className={`h-1 flex-1 ${
-              survivor.health < 30
-                ? "[&>div]:bg-red-500"
-                : survivor.health < 70
+        <div className="text-[9px] text-stone-500 leading-tight">
+          {roleLabel}
+        </div>
+        <Progress
+          value={survivor.health}
+          className={`h-0.5 mt-0.5 ${
+            survivor.health < 30
+              ? "[&>div]:bg-red-500"
+              : survivor.health < 70
                 ? "[&>div]:bg-amber-500"
                 : "[&>div]:bg-emerald-500"
-            }`}
-          />
-        </div>
+          }`}
+        />
       </div>
     </div>
   );

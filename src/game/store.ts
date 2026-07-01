@@ -27,6 +27,8 @@ import {
   getAreaConsumption,
   getSurvivorDailyRations,
   getRestHealAmount,
+  getRestHealTier,
+  syncSurvivorStatusFromHealth,
   NATURAL_HEAL_PER_DAY,
   getNeighborHexes,
   getSurvivorCapacity,
@@ -871,6 +873,8 @@ function processArea(
   const infirmaryLevel = area.hasBase ? area.buildings.infirmary.level : 0;
 
   areaSurvivors.forEach((s) => {
+    syncSurvivorStatusFromHealth(s);
+
     const fed = survivorFed.get(s.id) ?? false;
 
     if (fed && s.role !== "onMission") {
@@ -901,7 +905,8 @@ function processArea(
     }
 
     if (s.role === "resting") {
-      if (s.status === "healthy") {
+      const needsRecovery = getRestHealTier(s) !== null;
+      if (!needsRecovery) {
         s.morale = Math.min(100, s.morale + 10);
       } else if (fed) {
         const heal = getRestHealAmount(s, infirmaryLevel);
@@ -941,16 +946,9 @@ function processArea(
     }
   });
   areaSurvivors.forEach((s) => {
+    syncSurvivorStatusFromHealth(s);
     if (s.health <= 0) {
       // dead
-    } else if (s.health < 25) {
-      s.status = "critical";
-    } else if (s.health < 50) {
-      s.status = s.status === "sick" ? "sick" : "injured";
-    } else if (s.health < 70 && (s.status === "injured" || s.status === "critical")) {
-      s.status = "injured";
-    } else if (s.health >= 70 && s.status !== "sick") {
-      s.status = "healthy";
     }
   });
 
@@ -1588,11 +1586,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const survivor = state.survivors[survivorId];
     if (!survivor) return;
     const survivors = { ...state.survivors };
-    survivors[survivorId] = {
+    const updated = {
       ...survivor,
-      role: resting ? "resting" : "idle",
+      role: resting ? ("resting" as const) : ("idle" as const),
       assignedTeamId: undefined,
     };
+    syncSurvivorStatusFromHealth(updated);
+    survivors[survivorId] = updated;
     const areas = updateArea(state, state.currentAreaId, (a) => {
       a.teams = a.teams.map((t) => ({
         ...t,

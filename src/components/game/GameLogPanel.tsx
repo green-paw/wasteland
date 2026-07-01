@@ -12,19 +12,19 @@ export function GameLogPanel() {
   const recent = log.slice(-15);
 
   return (
-    <Card className="bg-stone-900/60 border-stone-800 p-3">
-      <div className="flex items-center gap-1.5 mb-2">
-        <Newspaper className="w-3.5 h-3.5 text-stone-400" />
-        <h3 className="text-xs uppercase tracking-wide text-stone-500">
+    <Card className="bg-stone-900/60 border-stone-800 p-2">
+      <div className="flex items-center gap-1 mb-1">
+        <Newspaper className="w-3 h-3 text-stone-400" />
+        <h3 className="text-[10px] uppercase tracking-wide text-stone-500">
           Recent Events
         </h3>
       </div>
-      <ScrollArea className="h-40">
-        <div className="space-y-1 pr-2">
+      <ScrollArea className="h-28">
+        <div className="space-y-0.5 pr-1">
           {recent.map((entry, i) => (
             <div
               key={i}
-              className={`text-[11px] leading-snug flex items-start gap-1 ${
+              className={`text-[10px] leading-snug flex items-start gap-1 ${
                 entry.type === "danger"
                   ? "text-red-300"
                   : entry.type === "warning"
